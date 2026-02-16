@@ -158,10 +158,90 @@ Format: `payload,description`
 
 ## Requirements
 
-- Linux (tested on Arch 24)
+- Linux (tested on Ubuntu 24)
 - Root/sudo privileges
 - WiFi adapter supporting monitor mode (for WiFi attacks)
 - Python 3.10+
+
+### Recommended WiFi Adapters
+
+For WiFi attacks (deauth, fake AP, handshake capture), you need a wireless adapter that supports **monitor mode** and **packet injection**. Built-in laptop WiFi cards often do NOT support these features.
+
+#### Recommended USB WiFi Dongles:
+
+**ALFA Network Adapters** (Most Popular):
+- **ALFA AWUS036ACH** - Dual-band (2.4GHz + 5GHz), Realtek RTL8812AU chipset
+- **ALFA AWUS036ACM** - Dual-band, MediaTek MT7612U chipset, excellent range
+- **ALFA AWUS036NHA** - 2.4GHz only, Atheros AR9271 chipset, very reliable
+- **ALFA AWUS036ACHM** - Dual-band, MediaTek chipset, compact design
+
+**TP-Link Adapters**:
+- **TP-Link TL-WN722N v1** (Version 1 ONLY - v2/v3 do NOT support monitor mode)
+- **TP-Link Archer T3U Plus** - MediaTek chipset
+
+**Panda Wireless**:
+- **Panda PAU09** - Ralink RT5572 chipset
+- **Panda PAU0D** - Dual-band
+
+**Other Options**:
+- **EDUP EP-AC1605** - RTL8812AU chipset
+- **COMFAST CF-912AC** - Dual-band
+
+#### Chipset Compatibility
+
+Look for adapters with these chipsets (best support in Linux):
+- **Atheros AR9271** - Excellent for 2.4GHz
+- **Ralink RT3070/RT5370/RT5572** - Good compatibility
+- **Realtek RTL8812AU** - Dual-band support
+- **MediaTek MT7612U/MT7610U** - Modern, good performance
+
+#### How to Check if Your Adapter Supports Monitor Mode
+
+```bash
+# Check if adapter is detected
+iw dev
+
+# Check if monitor mode is supported
+iw list | grep -A 10 "Supported interface modes" | grep monitor
+
+# Check if packet injection works
+sudo aireplay-ng --test wlan0
+```
+
+#### Important Notes
+
+- **Built-in laptop WiFi**: Usually does NOT support monitor mode
+- **USB 3.0**: Recommended for better performance and range
+- **Driver installation**: Some adapters require additional driver installation
+- **Kali Linux**: Most adapters work out-of-the-box on Kali
+- **Ubuntu/Debian**: May require driver compilation from GitHub
+
+#### Driver Installation Resources
+
+For RTL8812AU chipset:
+```bash
+git clone https://github.com/aircrack-ng/rtl8812au.git
+cd rtl8812au
+make
+sudo make install
+```
+
+For MT7612U chipset:
+```bash
+git clone https://github.com/gnab/rt2870.git
+cd rt2870
+make
+sudo make install
+```
+
+**Where to Buy**:
+- Amazon
+- eBay  
+- Official ALFA Network website
+- Hak5 shop
+- Local electronics stores
+
+**Price Range**: $20-80 USD depending on model and features.
 
 ## File Structure
 
