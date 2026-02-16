@@ -653,17 +653,13 @@ class WiFiScanner:
     
     @staticmethod
     def scan_wifi() -> List[Dict]:
-        """Scanne les réseaux WiFi disponibles"""
+        """Scanne les réseaux WiFi disponibles avec iw scan (complet) + nmcli (rapide)"""
         console.print("\n[warning]📡 Scan des réseaux WiFi...[/warning]")
         networks = []
         seen_bssids = set()
 
         try:
-            subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'rescan'],
-                           capture_output=True, timeout=10)
-            time.sleep(2)
-
-            # Trouver l'interface WiFi principale (connectée) pour éviter les doublons multi-interface
+            # Trouver l'interface WiFi principale
             wifi_iface = None
             try:
                 iw_r = subprocess.run(['iw', 'dev'], capture_output=True, text=True)
@@ -678,54 +674,132 @@ class WiFiScanner:
             except Exception:
                 pass
 
-            cmd = ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,FREQ,CHAN',
-                   'device', 'wifi', 'list']
-            if wifi_iface:
-                cmd += ['ifname', wifi_iface]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if not wifi_iface:
+                console.print("[error]Aucune interface WiFi trouvée[/error]")
+                return networks
 
-            for line in result.stdout.split('\n'):
-                if not line.strip():
-                    continue
-                # nmcli -t échappe les : dans les valeurs avec \:
-                parts = re.split(r'(?<!\\):', line)
-                if len(parts) < 4:
-                    continue
-                ssid  = parts[0].replace('\\:', ':').strip() or '<hidden>'
-                bssid = parts[1].replace('\\:', ':').strip().upper()
-                if not re.match(r'[0-9A-F]{2}(:[0-9A-F]{2}){5}', bssid):
-                    continue
-                if bssid in seen_bssids:
-                    continue
-                seen_bssids.add(bssid)
-
-                try:    signal = int(parts[2].strip())
-                except  ValueError: signal = 0
-                security = parts[3].strip() or '--'
-                freq_raw = parts[4].strip() if len(parts) > 4 else ''
-                chan     = parts[5].strip() if len(parts) > 5 else ''
-
-                try:    freq_mhz = int(freq_raw.split()[0])
-                except  (ValueError, IndexError): freq_mhz = 0
-                is_open = security in ('--', '')
-                band    = '5GHz' if freq_mhz >= 3000 else '2.4GHz' if freq_mhz > 0 else ''
-                manufacturer = OUILookup.lookup(bssid)
-
+            # SCAN COMPLET avec iw (pas de limite de 20 réseaux)
+            console.print(f"[dim]Scan radio sur {wifi_iface}...[/dim]")
+            subprocess.run(['sudo', 'iw', 'dev', wifi_iface, 'scan', 'flush'], 
+                         capture_output=True, timeout=5)
+            time.sleep(1)
+            iw_scan = subprocess.run(['sudo', 'iw', 'dev', wifi_iface, 'scan'],
+                                   capture_output=True, text=True, timeout=15)
+            
+            current_bss = None
+            current_ssid = None
+            current_signal = 0
+            current_freq = 0
+            current_chan = ''
+            current_security = 'WPA2'
+            
+            for line in iw_scan.stdout.split('\n'):
+                line = line.strip()
+                if line.startswith('BSS '):
+                    # Sauvegarder le précédent
+                    if current_bss:
+                        freq_mhz = current_freq
+                        band = '5GHz' if freq_mhz >= 3000 else '2.4GHz' if freq_mhz > 0 else ''
+                        networks.append({
+                            'ssid': current_ssid or '<hidden>',
+                            'bssid': current_bss,
+                            'signal': current_signal,
+                            'bars': WiFiScanner.signal_to_bars(current_signal),
+                            'security': current_security,
+                            'is_open': current_security == 'Ouvert',
+                            'freq': f"{current_freq} MHz" if current_freq else '',
+                            'chan': current_chan,
+                            'band': band,
+                            'manufacturer': OUILookup.lookup(current_bss) or 'Inconnu'
+                        })
+                        seen_bssids.add(current_bss)
+                    
+                    # Nouveau BSS
+                    current_bss = line.split()[1][:17].upper()
+                    if current_bss in seen_bssids:
+                        current_bss = None
+                        continue
+                    current_ssid = None
+                    current_signal = 0
+                    current_freq = 0
+                    current_chan = ''
+                    current_security = 'WPA2'
+                
+                elif current_bss and line.startswith('SSID:') and 'Extended' not in line:
+                    current_ssid = line[5:].strip()
+                elif current_bss and 'signal:' in line:
+                    try:
+                        sig_dbm = float(line.split('signal:')[1].split()[0])
+                        # Convertir dBm en % (approximation)
+                        current_signal = max(0, min(100, int((sig_dbm + 100) * 1.5)))
+                    except:
+                        pass
+                elif current_bss and ('freq:' in line or 'DS Parameter set' in line or 'primary channel' in line):
+                    match = re.search(r'(\d{4,5})', line)
+                    if match:
+                        current_freq = int(match.group(1))
+                        # Calculer le canal
+                        if 2400 <= current_freq <= 2500:
+                            current_chan = str((current_freq - 2407) // 5)
+                        elif 5000 <= current_freq <= 6000:
+                            current_chan = str((current_freq - 5000) // 5)
+                elif current_bss and 'WPA3' in line:
+                    current_security = 'WPA3'
+                elif current_bss and ('RSN' in line or 'WPA2' in line):
+                    if current_security != 'WPA3':
+                        current_security = 'WPA2'
+                elif current_bss and 'WPA:' in line and 'WPA2' not in line:
+                    if current_security not in ('WPA2', 'WPA3'):
+                        current_security = 'WPA'
+            
+            # Dernier BSS
+            if current_bss and current_bss not in seen_bssids:
+                freq_mhz = current_freq
+                band = '5GHz' if freq_mhz >= 3000 else '2.4GHz' if freq_mhz > 0 else ''
                 networks.append({
-                    'ssid':  ssid, 'bssid': bssid, 'signal': signal,
-                    'bars':  WiFiScanner.signal_to_bars(signal),
-                    'security': 'Ouvert' if is_open else security,
-                    'is_open': is_open, 'freq': freq_raw, 'chan': chan,
-                    'band': band, 'manufacturer': manufacturer or 'Inconnu'
+                    'ssid': current_ssid or '<hidden>',
+                    'bssid': current_bss,
+                    'signal': current_signal,
+                    'bars': WiFiScanner.signal_to_bars(current_signal),
+                    'security': current_security,
+                    'is_open': current_security == 'Ouvert',
+                    'freq': f"{current_freq} MHz" if current_freq else '',
+                    'chan': current_chan,
+                    'band': band,
+                    'manufacturer': OUILookup.lookup(current_bss) or 'Inconnu'
                 })
+
+            # COMPLÉMENT nmcli (pour avoir les infos de sécurité précises)
+            try:
+                subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'rescan'],
+                             capture_output=True, timeout=5)
+                cmd = ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY',
+                       'device', 'wifi', 'list', 'ifname', wifi_iface]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                for line in result.stdout.split('\n'):
+                    if not line.strip():
+                        continue
+                    parts = re.split(r'(?<!\\):', line)
+                    if len(parts) < 4:
+                        continue
+                    bssid = parts[1].replace('\\:', ':').strip().upper()
+                    security = parts[3].strip()
+                    
+                    # Mettre à jour la sécurité si on a déjà ce BSSID
+                    for net in networks:
+                        if net['bssid'] == bssid and security and security != '--':
+                            net['security'] = security
+                            net['is_open'] = False
+                            break
+            except:
+                pass  # Si nmcli échoue, on continue avec iw seul
 
             networks.sort(key=lambda x: x['signal'], reverse=True)
             console.print(f"[success]✓ {len(networks)} réseau(x) unique(s)[/success]")
 
         except subprocess.TimeoutExpired:
             console.print("[error]Timeout scan WiFi[/error]")
-        except FileNotFoundError:
-            console.print("[error]nmcli non trouvé[/error]")
         except Exception as e:
             console.print(f"[error]Erreur: {e}[/error]")
 
@@ -2046,30 +2120,112 @@ class PentestTool:
             self._deauth_monitor(selected_iface)
 
     def _set_channel(self, mon_iface: str, channel):
-        """Fixe le canal — gère 2.4GHz et 5GHz (HT20 requis pour les canaux > 14)"""
+        """Fixe le canal — utilise la fréquence MHz pour le 5GHz (plus fiable que le numéro de canal)"""
         try:
             ch = int(str(channel).strip())
         except (ValueError, TypeError):
-            console.print(f"[warning]Canal invalide: {channel!r}[/warning]")
+            console.print(f"[warning]Canal invalide: {channel!r} — skip[/warning]")
             return
-        band = "(5GHz)" if ch > 14 else "(2.4GHz)"
-        console.print(f"[info]📻 Canal {ch} {band}...[/info]")
-        for flags in [["HT20"], ["HT40+"], []]:
-            args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
-            if subprocess.run(args, capture_output=True).returncode == 0:
-                time.sleep(0.5)
-                return
-        subprocess.run(["sudo", "iwconfig", mon_iface, "channel", str(ch)], capture_output=True)
+
+        is_5ghz = ch > 14
+        band_str = "(5GHz)" if is_5ghz else "(2.4GHz)"
+
+        # Calculer la fréquence MHz correspondante
+        if 1 <= ch <= 14:
+            freq_mhz = 2407 + ch * 5
+            if ch == 14: freq_mhz = 2484
+        elif 36 <= ch <= 177:
+            freq_mhz = 5000 + ch * 5
+        else:
+            freq_mhz = None
+
+        console.print(f"[info]📻 Canal {ch} {band_str}"
+                      f"{f' ({freq_mhz} MHz)' if freq_mhz else ''}...[/info]")
+
+        success = False
+
+        if freq_mhz and is_5ghz:
+            # Pour le 5GHz : utiliser iw set freq MHz [HT20] — BEAUCOUP plus fiable
+            for flags in ["HT20", "HT40+", "HT40-", "80MHz", ""]:
+                args = ["sudo", "iw", "dev", mon_iface, "set", "freq", str(freq_mhz)]
+                if flags:
+                    args.append(flags)
+                r = subprocess.run(args, capture_output=True, text=True)
+                if r.returncode == 0:
+                    success = True
+                    break
+                # Certains drivers n'acceptent pas le suffixe de largeur
+            if not success:
+                # Fallback : numéro de canal avec HT20
+                for flags in [["HT20"], []]:
+                    args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
+                    if subprocess.run(args, capture_output=True).returncode == 0:
+                        success = True; break
+        else:
+            # 2.4GHz : numéro de canal suffit
+            for flags in [["HT20"], []]:
+                args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
+                if subprocess.run(args, capture_output=True).returncode == 0:
+                    success = True; break
+
+        if not success:
+            # Dernier recours : iwconfig
+            subprocess.run(["sudo", "iwconfig", mon_iface, "channel", str(ch)],
+                           capture_output=True)
+
         time.sleep(0.5)
 
-    def _get_monitor_iface(self, selected_iface: str) -> str:
-        """Active le mode monitor et retourne le nom de l'interface créée"""
+        # Vérifier que le canal a bien été fixé
+        iw_info = subprocess.run(["sudo", "iw", "dev", mon_iface, "info"],
+                                  capture_output=True, text=True).stdout
+        actual_ch = None
+        for line in iw_info.split("\n"):
+            m = re.search(r"channel (\d+)", line, re.I)
+            if m:
+                actual_ch = int(m.group(1))
+                break
+        if actual_ch and actual_ch != ch:
+            console.print(f"[warning]⚠ Interface sur canal {actual_ch} au lieu de {ch}[/warning]")
+            console.print(f"[dim]Certains drivers limitent la bande 5GHz — vérifier les capacités de la carte[/dim]")
+        elif actual_ch == ch:
+            console.print(f"[success]✓ Canal {ch} confirmé[/success]")
+
+    def _get_monitor_iface(self, selected_iface: str, channel: str = None) -> str:
+        """Active le mode monitor — passe le canal à airmon-ng pour éviter les limitations 5GHz"""
         subprocess.run(["sudo", "airmon-ng", "check", "kill"], capture_output=True)
+
+        # Vérifier les capacités 5GHz de la carte avant de commencer
+        if channel:
+            try:
+                ch = int(str(channel).strip())
+                if ch > 14:
+                    phy_r = subprocess.run(
+                        ["sudo", "iw", "phy"],
+                        capture_output=True, text=True)
+                    # Chercher si la PHY supporte les canaux 5GHz
+                    has_5ghz = any(
+                        f"* {5000 + int(c)*5} MHz" in phy_r.stdout or
+                        f"[{c}]" in phy_r.stdout
+                        for c in [str(ch)]
+                    ) or "5180" in phy_r.stdout or "5GHz" in phy_r.stdout
+                    if not has_5ghz:
+                        console.print(f"[warning]⚠ Vérifiez que la carte supporte le 5GHz[/warning]")
+            except (ValueError, TypeError):
+                pass
+
         before = set(subprocess.run(["ip", "-o", "link", "show"],
                      capture_output=True, text=True).stdout.split("\n"))
-        r = subprocess.run(["sudo", "airmon-ng", "start", selected_iface],
-                           capture_output=True, text=True)
+
+        # Passer le canal à airmon-ng si spécifié (démarre directement sur la bonne fréquence)
+        cmd = ["sudo", "airmon-ng", "start", selected_iface]
+        if channel:
+            try:
+                cmd.append(str(int(str(channel).strip())))
+            except (ValueError, TypeError):
+                pass
+        subprocess.run(cmd, capture_output=True, text=True)
         time.sleep(1)
+
         after = set(subprocess.run(["ip", "-o", "link", "show"],
                     capture_output=True, text=True).stdout.split("\n"))
         mon = None
@@ -2092,109 +2248,54 @@ class PentestTool:
         return mon or (selected_iface + "mon")
 
     def _deauth_monitor(self, selected_iface: str):
-        """Deauth mode monitor — scan iw/airodump puis envoi trames"""
-        import tempfile, os, shutil
-        console.print(f"[warning]⚠ {selected_iface} passera en mode monitor[/warning]")
-        mon_iface = self._get_monitor_iface(selected_iface)
-        console.print(f"[success]✓ Monitor: [bold]{mon_iface}[/bold][/success]")
+        """Deauth mode monitor — scan via WiFiScanner (même liste que option 7) puis monitor"""
+        console.print(f"[warning]⚠ {selected_iface} passera en mode monitor après le scan[/warning]")
 
-        tmpdir = tempfile.mkdtemp(prefix="deauth_")
-        os.chmod(tmpdir, 0o777)
-        aps = {}
+        # 1. Scan en mode managed — même fonction que l'option 7, résultat identique
+        console.print(f"[info]📡 Scan des APs...[/info]")
+        networks = WiFiScanner.scan_wifi()
 
-        try:
-            scan_dur = int(Prompt.ask("[orange1]Durée scan (s)[/orange1]", default="10"))
-            console.print(f"[info]🔍 Scan ({scan_dur}s)...[/info]")
-            devnull = open(os.devnull, "w")
-            p = subprocess.Popen(
-                ["sudo", "airodump-ng", "--output-format", "csv",
-                 "-w", f"{tmpdir}/scan", mon_iface],
-                stdout=devnull, stderr=devnull,
-                stdin=subprocess.DEVNULL, close_fds=True)
-            time.sleep(scan_dur)
-            subprocess.run(["sudo", "pkill", "-9", "-f", "airodump-ng"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try: p.wait(timeout=3)
-            except Exception: pass
-            devnull.close()
-
-            csv_f = next((os.path.join(tmpdir, f) for f in sorted(os.listdir(tmpdir))
-                          if f.endswith(".csv")), None)
-            if csv_f:
-                in_sta = False
-                for line in open(csv_f, errors="ignore"):
-                    if "Station MAC" in line: in_sta = True; continue
-                    if not line.strip(): continue
-                    p2 = [x.strip() for x in line.split(",")]
-                    if not in_sta and len(p2) >= 14 and len(p2[0]) == 17 and "BSSID" not in p2[0]:
-                        b = p2[0].lower()
-                        aps[b] = {"ssid": p2[13] or "<hidden>", "channel": p2[3].strip(),
-                                  "enc": p2[5].strip() or "OPN", "clients": []}
-                    elif in_sta and len(p2) >= 6 and len(p2[0]) == 17:
-                        cm = p2[0].lower(); ab = p2[5].lower().strip()
-                        if ab and ab != "(not associated)" and ab in aps:
-                            aps[ab]["clients"].append(cm)
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            import os as _os; _os.system("reset"); time.sleep(0.3)
-
-        # Fallback iw scan
-        if not aps:
-            console.print("[warning]⚠ Fallback iw scan...[/warning]")
-            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "down"], capture_output=True)
-            subprocess.run(["sudo", "iw", mon_iface, "set", "type", "managed"], capture_output=True)
-            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "up"], capture_output=True)
-            iw_out = subprocess.run(["sudo", "iw", "dev", mon_iface, "scan"],
-                                    capture_output=True, text=True, timeout=20).stdout
-            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "down"], capture_output=True)
-            subprocess.run(["sudo", "iw", mon_iface, "set", "type", "monitor"], capture_output=True)
-            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "up"], capture_output=True)
-            cur_b = cur_s = cur_c = None; cur_e = "WPA2"
-            def _sv():
-                if cur_b and len(cur_b) == 17 and cur_b.count(":") == 5:
-                    aps[cur_b] = {"ssid": cur_s or "<hidden>", "channel": str(cur_c or ""),
-                                  "enc": cur_e, "clients": []}
-            for line in iw_out.split("\n"):
-                line = line.strip()
-                if line.startswith("BSS "):
-                    _sv(); cur_b = line.split()[1][:17]; cur_s = cur_c = None; cur_e = "WPA2"
-                elif line.startswith("SSID:") and "Extended" not in line:
-                    v = line[5:].strip()
-                    if v: cur_s = v
-                elif "DS Parameter set: channel" in line or "* primary channel:" in line:
-                    mm = re.search(r"channel[:\s]+(\d+)", line, re.I)
-                    if mm: cur_c = mm.group(1)
-                elif "WPA3" in line: cur_e = "WPA3"
-                elif "WPA2" in line or "RSN" in line: cur_e = "WPA2"
-            _sv()
-            if aps: console.print(f"[success]✓ {len(aps)} AP(s)[/success]")
-
-        if not aps:
+        if not networks:
             console.print("[error]Aucun AP trouvé[/error]")
-            subprocess.run(["sudo", "airmon-ng", "stop", mon_iface], capture_output=True)
-            subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], capture_output=True)
             Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
             return
 
-        ap_list = [(b, i) for b, i in aps.items() if len(b) == 17 and b.count(":") == 5]
+        # 2. Tableau AP identique au scanner WiFi
         ap_t = Table(title="📡 APs", box=box.DOUBLE_EDGE, style="white", header_style="bold red")
-        ap_t.add_column("#",     style="orange1",    width=4, justify="right")
+        ap_t.add_column("#",     style="orange1",    width=4,  justify="right")
         ap_t.add_column("SSID",  style="bold green", width=26, overflow="fold")
         ap_t.add_column("BSSID", style="dim white",  width=19)
         ap_t.add_column("CH",    style="cyan",       width=5,  justify="center")
-        ap_t.add_column("Enc",   style="yellow",     width=10)
-        for idx, (b, i) in enumerate(ap_list, 1):
-            ch = str(i["channel"])
+        ap_t.add_column("Bande", style="bold white", width=7,  justify="center")
+        ap_t.add_column("Enc",   style="yellow",     width=16)
+        for idx, n in enumerate(networks, 1):
+            ch = str(n['chan'])
             ch_c = f"[magenta]{ch}[/magenta]" if ch.isdigit() and int(ch) > 14 else ch
-            ap_t.add_row(str(idx), i["ssid"], b, ch_c, i["enc"])
+            band = n.get('band', '')
+            band_c = "magenta" if band == '5GHz' else "cyan"
+            band_t = f"[{band_c}]{band}[/{band_c}]" if band else ""
+            ap_t.add_row(str(idx), n['ssid'], n['bssid'], ch_c, band_t, n['security'])
         console.print(ap_t)
 
         try:
-            tb, ti = ap_list[int(Prompt.ask("[orange1]AP cible[/orange1]", default="1")) - 1]
+            idx_sel = int(Prompt.ask("[orange1]AP cible[/orange1]", default="1")) - 1
+            target_net = networks[idx_sel]
         except (ValueError, IndexError):
-            tb, ti = ap_list[0]
+            target_net = networks[0]
 
-        self._send_deauth(mon_iface, tb, ti["ssid"], ti["channel"], ti["clients"])
+        target_bssid   = target_net['bssid'].lower()
+        target_channel = target_net['chan']
+        target_ssid    = target_net['ssid']
+        is_5ghz        = target_net.get('band') == '5GHz'
+
+        if is_5ghz:
+            console.print(f"[info]📶 Réseau 5GHz détecté (canal {target_channel}) — utilisation fréquence MHz[/info]")
+
+        # 3. Passer en monitor APRÈS la sélection, en passant le canal à airmon-ng
+        mon_iface = self._get_monitor_iface(selected_iface, channel=target_channel)
+        console.print(f"[success]✓ Monitor: [bold]{mon_iface}[/bold][/success]")
+
+        self._send_deauth(mon_iface, target_bssid, target_ssid, target_channel, [])
         subprocess.run(["sudo", "airmon-ng", "stop", mon_iface], capture_output=True)
         subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], capture_output=True)
         console.print(f"[success]✓ {mon_iface} → managed[/success]")
@@ -2285,9 +2386,11 @@ class PentestTool:
         except (ValueError, IndexError):
             tgt_mac = "ff:ff:ff:ff:ff:ff"
 
-        # Passer en monitor
+        # Passer en monitor avec le canal cible (crucial pour le 5GHz)
         console.print("\n[info]🔧 Mode monitor...[/info]")
-        mon_iface = self.dns_monitor.enable_monitor_mode(selected_iface)
+        if cur_ch and int(cur_ch) > 14:
+            console.print(f"[info]📶 Canal 5GHz {cur_ch} — passage en monitor avec fréquence MHz[/info]")
+        mon_iface = self._get_monitor_iface(selected_iface, channel=str(cur_ch) if cur_ch else None)
         if not mon_iface:
             console.print("[error]Impossible d\'activer le mode monitor[/error]")
             Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
