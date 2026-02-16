@@ -158,7 +158,7 @@ Format: `payload,description`
 
 ## Requirements
 
-- Linux (tested on Ubuntu 24)
+- Linux (tested on Arch 24)
 - Root/sudo privileges
 - WiFi adapter supporting monitor mode (for WiFi attacks)
 - Python 3.10+
