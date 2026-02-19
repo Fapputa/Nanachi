@@ -913,21 +913,30 @@ class NmapScanner:
     
     @staticmethod
     def scan_network(interface: str, timing: str = "T3") -> List[Dict]:
-        """Scan du réseau sur une interface donnée"""
+        """Scan du réseau sur une interface donnée, ou d'un domaine/IP"""
         console.print(f"\n[warning]🔍 Scan du réseau sur {interface} (Timing: {timing})...[/warning]")
         
         try:
-            # Scan avec -PR pour ARP (récupère les MACs)
-            cmd = ['sudo', 'nmap', '-sn', '-PR', f'-{timing}', interface]
+            # Détecter si c'est un réseau local (CIDR) ou un domaine/IP unique
+            is_network = '/' in interface  # 192.168.1.0/24
+            
+            if is_network:
+                # Scan réseau local avec ARP pour récupérer les MACs
+                cmd = ['sudo', 'nmap', '-sn', '-PR', f'-{timing}', interface]
+            else:
+                # Scan domaine/IP unique — pas de -PR (ARP), juste -sn (ping scan)
+                cmd = ['sudo', 'nmap', '-sn', f'-{timing}', interface]
+            
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
             hosts = []
             current_ip = None
             current_mac = None
+            current_hostname = None
             
             for line in result.stdout.split('\n'):
-                # Récupérer l'IP
-                ip_match = re.search(r'Nmap scan report for (\d+\.\d+\.\d+\.\d+)', line)
+                # Récupérer l'IP (avec ou sans hostname)
+                ip_match = re.search(r'Nmap scan report for (?:([^\s]+) \()?(\d+\.\d+\.\d+\.\d+)\)?', line)
                 if ip_match:
                     if current_ip:  # Sauvegarder l'hôte précédent
                         hosts.append({
@@ -935,7 +944,8 @@ class NmapScanner:
                             'mac': current_mac,
                             'manufacturer': OUILookup.lookup(current_mac) if current_mac else None
                         })
-                    current_ip = ip_match.group(1)
+                    current_hostname = ip_match.group(1) if ip_match.group(1) else None
+                    current_ip = ip_match.group(2)
                     current_mac = None
                 
                 # Récupérer la MAC
@@ -1576,6 +1586,7 @@ class PentestTool:
             menu.add_row("A", "🎧 Netcat listener")
             menu.add_row("B", "📡 Fake AP (Evil Twin)")
             menu.add_row("C", "🤝 Capture Handshake WPA")
+            menu.add_row("D", "📁 Gobuster (scan web)")
             menu.add_row("0", "❌ Quitter")
             
             # Partie 2 du crâne
@@ -1610,6 +1621,8 @@ class PentestTool:
                 self._fake_ap_menu()
             elif choice in ("C", "c"):
                 self._handshake_menu()
+            elif choice in ("D", "d"):
+                self._gobuster_menu()
             elif choice == "0":
                 console.print("[success]Au revoir! 👋[/success]")
                 break
@@ -2120,112 +2133,30 @@ class PentestTool:
             self._deauth_monitor(selected_iface)
 
     def _set_channel(self, mon_iface: str, channel):
-        """Fixe le canal — utilise la fréquence MHz pour le 5GHz (plus fiable que le numéro de canal)"""
+        """Fixe le canal — gère 2.4GHz et 5GHz (HT20 requis pour les canaux > 14)"""
         try:
             ch = int(str(channel).strip())
         except (ValueError, TypeError):
-            console.print(f"[warning]Canal invalide: {channel!r} — skip[/warning]")
+            console.print(f"[warning]Canal invalide: {channel!r}[/warning]")
             return
-
-        is_5ghz = ch > 14
-        band_str = "(5GHz)" if is_5ghz else "(2.4GHz)"
-
-        # Calculer la fréquence MHz correspondante
-        if 1 <= ch <= 14:
-            freq_mhz = 2407 + ch * 5
-            if ch == 14: freq_mhz = 2484
-        elif 36 <= ch <= 177:
-            freq_mhz = 5000 + ch * 5
-        else:
-            freq_mhz = None
-
-        console.print(f"[info]📻 Canal {ch} {band_str}"
-                      f"{f' ({freq_mhz} MHz)' if freq_mhz else ''}...[/info]")
-
-        success = False
-
-        if freq_mhz and is_5ghz:
-            # Pour le 5GHz : utiliser iw set freq MHz [HT20] — BEAUCOUP plus fiable
-            for flags in ["HT20", "HT40+", "HT40-", "80MHz", ""]:
-                args = ["sudo", "iw", "dev", mon_iface, "set", "freq", str(freq_mhz)]
-                if flags:
-                    args.append(flags)
-                r = subprocess.run(args, capture_output=True, text=True)
-                if r.returncode == 0:
-                    success = True
-                    break
-                # Certains drivers n'acceptent pas le suffixe de largeur
-            if not success:
-                # Fallback : numéro de canal avec HT20
-                for flags in [["HT20"], []]:
-                    args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
-                    if subprocess.run(args, capture_output=True).returncode == 0:
-                        success = True; break
-        else:
-            # 2.4GHz : numéro de canal suffit
-            for flags in [["HT20"], []]:
-                args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
-                if subprocess.run(args, capture_output=True).returncode == 0:
-                    success = True; break
-
-        if not success:
-            # Dernier recours : iwconfig
-            subprocess.run(["sudo", "iwconfig", mon_iface, "channel", str(ch)],
-                           capture_output=True)
-
+        band = "(5GHz)" if ch > 14 else "(2.4GHz)"
+        console.print(f"[info]📻 Canal {ch} {band}...[/info]")
+        for flags in [["HT20"], ["HT40+"], []]:
+            args = ["sudo", "iw", "dev", mon_iface, "set", "channel", str(ch)] + flags
+            if subprocess.run(args, capture_output=True).returncode == 0:
+                time.sleep(0.5)
+                return
+        subprocess.run(["sudo", "iwconfig", mon_iface, "channel", str(ch)], capture_output=True)
         time.sleep(0.5)
 
-        # Vérifier que le canal a bien été fixé
-        iw_info = subprocess.run(["sudo", "iw", "dev", mon_iface, "info"],
-                                  capture_output=True, text=True).stdout
-        actual_ch = None
-        for line in iw_info.split("\n"):
-            m = re.search(r"channel (\d+)", line, re.I)
-            if m:
-                actual_ch = int(m.group(1))
-                break
-        if actual_ch and actual_ch != ch:
-            console.print(f"[warning]⚠ Interface sur canal {actual_ch} au lieu de {ch}[/warning]")
-            console.print(f"[dim]Certains drivers limitent la bande 5GHz — vérifier les capacités de la carte[/dim]")
-        elif actual_ch == ch:
-            console.print(f"[success]✓ Canal {ch} confirmé[/success]")
-
-    def _get_monitor_iface(self, selected_iface: str, channel: str = None) -> str:
-        """Active le mode monitor — passe le canal à airmon-ng pour éviter les limitations 5GHz"""
+    def _get_monitor_iface(self, selected_iface: str) -> str:
+        """Active le mode monitor et retourne le nom de l'interface créée"""
         subprocess.run(["sudo", "airmon-ng", "check", "kill"], capture_output=True)
-
-        # Vérifier les capacités 5GHz de la carte avant de commencer
-        if channel:
-            try:
-                ch = int(str(channel).strip())
-                if ch > 14:
-                    phy_r = subprocess.run(
-                        ["sudo", "iw", "phy"],
-                        capture_output=True, text=True)
-                    # Chercher si la PHY supporte les canaux 5GHz
-                    has_5ghz = any(
-                        f"* {5000 + int(c)*5} MHz" in phy_r.stdout or
-                        f"[{c}]" in phy_r.stdout
-                        for c in [str(ch)]
-                    ) or "5180" in phy_r.stdout or "5GHz" in phy_r.stdout
-                    if not has_5ghz:
-                        console.print(f"[warning]⚠ Vérifiez que la carte supporte le 5GHz[/warning]")
-            except (ValueError, TypeError):
-                pass
-
         before = set(subprocess.run(["ip", "-o", "link", "show"],
                      capture_output=True, text=True).stdout.split("\n"))
-
-        # Passer le canal à airmon-ng si spécifié (démarre directement sur la bonne fréquence)
-        cmd = ["sudo", "airmon-ng", "start", selected_iface]
-        if channel:
-            try:
-                cmd.append(str(int(str(channel).strip())))
-            except (ValueError, TypeError):
-                pass
-        subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(["sudo", "airmon-ng", "start", selected_iface],
+                           capture_output=True, text=True)
         time.sleep(1)
-
         after = set(subprocess.run(["ip", "-o", "link", "show"],
                     capture_output=True, text=True).stdout.split("\n"))
         mon = None
@@ -2248,54 +2179,109 @@ class PentestTool:
         return mon or (selected_iface + "mon")
 
     def _deauth_monitor(self, selected_iface: str):
-        """Deauth mode monitor — scan via WiFiScanner (même liste que option 7) puis monitor"""
-        console.print(f"[warning]⚠ {selected_iface} passera en mode monitor après le scan[/warning]")
+        """Deauth mode monitor — scan iw/airodump puis envoi trames"""
+        import tempfile, os, shutil
+        console.print(f"[warning]⚠ {selected_iface} passera en mode monitor[/warning]")
+        mon_iface = self._get_monitor_iface(selected_iface)
+        console.print(f"[success]✓ Monitor: [bold]{mon_iface}[/bold][/success]")
 
-        # 1. Scan en mode managed — même fonction que l'option 7, résultat identique
-        console.print(f"[info]📡 Scan des APs...[/info]")
-        networks = WiFiScanner.scan_wifi()
+        tmpdir = tempfile.mkdtemp(prefix="deauth_")
+        os.chmod(tmpdir, 0o777)
+        aps = {}
 
-        if not networks:
+        try:
+            scan_dur = int(Prompt.ask("[orange1]Durée scan (s)[/orange1]", default="15"))
+            console.print(f"[info]🔍 Scan 2.4GHz + 5GHz ({scan_dur}s)...[/info]")
+            devnull = open(os.devnull, "w")
+            p = subprocess.Popen(
+                ["sudo", "airodump-ng", "--band", "abg", "--output-format", "csv",
+                 "-w", f"{tmpdir}/scan", mon_iface],
+                stdout=devnull, stderr=devnull,
+                stdin=subprocess.DEVNULL, close_fds=True)
+            time.sleep(scan_dur)
+            subprocess.run(["sudo", "pkill", "-9", "-f", "airodump-ng"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try: p.wait(timeout=3)
+            except Exception: pass
+            devnull.close()
+
+            csv_f = next((os.path.join(tmpdir, f) for f in sorted(os.listdir(tmpdir))
+                          if f.endswith(".csv")), None)
+            if csv_f:
+                in_sta = False
+                for line in open(csv_f, errors="ignore"):
+                    if "Station MAC" in line: in_sta = True; continue
+                    if not line.strip(): continue
+                    p2 = [x.strip() for x in line.split(",")]
+                    if not in_sta and len(p2) >= 14 and len(p2[0]) == 17 and "BSSID" not in p2[0]:
+                        b = p2[0].lower()
+                        aps[b] = {"ssid": p2[13] or "<hidden>", "channel": p2[3].strip(),
+                                  "enc": p2[5].strip() or "OPN", "clients": []}
+                    elif in_sta and len(p2) >= 6 and len(p2[0]) == 17:
+                        cm = p2[0].lower(); ab = p2[5].lower().strip()
+                        if ab and ab != "(not associated)" and ab in aps:
+                            aps[ab]["clients"].append(cm)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            import os as _os; _os.system("reset"); time.sleep(0.3)
+
+        # Fallback iw scan
+        if not aps:
+            console.print("[warning]⚠ Fallback iw scan...[/warning]")
+            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "down"], capture_output=True)
+            subprocess.run(["sudo", "iw", mon_iface, "set", "type", "managed"], capture_output=True)
+            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "up"], capture_output=True)
+            iw_out = subprocess.run(["sudo", "iw", "dev", mon_iface, "scan"],
+                                    capture_output=True, text=True, timeout=20).stdout
+            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "down"], capture_output=True)
+            subprocess.run(["sudo", "iw", mon_iface, "set", "type", "monitor"], capture_output=True)
+            subprocess.run(["sudo", "ip", "link", "set", mon_iface, "up"], capture_output=True)
+            cur_b = cur_s = cur_c = None; cur_e = "WPA2"
+            def _sv():
+                if cur_b and len(cur_b) == 17 and cur_b.count(":") == 5:
+                    aps[cur_b] = {"ssid": cur_s or "<hidden>", "channel": str(cur_c or ""),
+                                  "enc": cur_e, "clients": []}
+            for line in iw_out.split("\n"):
+                line = line.strip()
+                if line.startswith("BSS "):
+                    _sv(); cur_b = line.split()[1][:17]; cur_s = cur_c = None; cur_e = "WPA2"
+                elif line.startswith("SSID:") and "Extended" not in line:
+                    v = line[5:].strip()
+                    if v: cur_s = v
+                elif "DS Parameter set: channel" in line or "* primary channel:" in line:
+                    mm = re.search(r"channel[:\s]+(\d+)", line, re.I)
+                    if mm: cur_c = mm.group(1)
+                elif "WPA3" in line: cur_e = "WPA3"
+                elif "WPA2" in line or "RSN" in line: cur_e = "WPA2"
+            _sv()
+            if aps: console.print(f"[success]✓ {len(aps)} AP(s)[/success]")
+
+        if not aps:
             console.print("[error]Aucun AP trouvé[/error]")
+            subprocess.run(["sudo", "airmon-ng", "stop", mon_iface], capture_output=True)
+            subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], capture_output=True)
             Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
             return
 
-        # 2. Tableau AP identique au scanner WiFi
+        ap_list = [(b, i) for b, i in aps.items() if len(b) == 17 and b.count(":") == 5]
         ap_t = Table(title="📡 APs", box=box.DOUBLE_EDGE, style="white", header_style="bold red")
-        ap_t.add_column("#",     style="orange1",    width=4,  justify="right")
+        ap_t.add_column("#",     style="orange1",    width=4, justify="right")
         ap_t.add_column("SSID",  style="bold green", width=26, overflow="fold")
         ap_t.add_column("BSSID", style="dim white",  width=19)
         ap_t.add_column("CH",    style="cyan",       width=5,  justify="center")
-        ap_t.add_column("Bande", style="bold white", width=7,  justify="center")
-        ap_t.add_column("Enc",   style="yellow",     width=16)
-        for idx, n in enumerate(networks, 1):
-            ch = str(n['chan'])
+        ap_t.add_column("Enc",   style="yellow",     width=10)
+        for idx, (b, i) in enumerate(ap_list, 1):
+            ch = str(i["channel"])
             ch_c = f"[magenta]{ch}[/magenta]" if ch.isdigit() and int(ch) > 14 else ch
-            band = n.get('band', '')
-            band_c = "magenta" if band == '5GHz' else "cyan"
-            band_t = f"[{band_c}]{band}[/{band_c}]" if band else ""
-            ap_t.add_row(str(idx), n['ssid'], n['bssid'], ch_c, band_t, n['security'])
+            ap_t.add_row(str(idx), i["ssid"], b, ch_c, i["enc"])
         console.print(ap_t)
 
         try:
-            idx_sel = int(Prompt.ask("[orange1]AP cible[/orange1]", default="1")) - 1
-            target_net = networks[idx_sel]
+            tb, ti = ap_list[int(Prompt.ask("[orange1]AP cible[/orange1]", default="1")) - 1]
         except (ValueError, IndexError):
-            target_net = networks[0]
+            tb, ti = ap_list[0]
 
-        target_bssid   = target_net['bssid'].lower()
-        target_channel = target_net['chan']
-        target_ssid    = target_net['ssid']
-        is_5ghz        = target_net.get('band') == '5GHz'
-
-        if is_5ghz:
-            console.print(f"[info]📶 Réseau 5GHz détecté (canal {target_channel}) — utilisation fréquence MHz[/info]")
-
-        # 3. Passer en monitor APRÈS la sélection, en passant le canal à airmon-ng
-        mon_iface = self._get_monitor_iface(selected_iface, channel=target_channel)
-        console.print(f"[success]✓ Monitor: [bold]{mon_iface}[/bold][/success]")
-
-        self._send_deauth(mon_iface, target_bssid, target_ssid, target_channel, [])
+        self._send_deauth(mon_iface, tb, ti["ssid"], ti["channel"], ti["clients"])
         subprocess.run(["sudo", "airmon-ng", "stop", mon_iface], capture_output=True)
         subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], capture_output=True)
         console.print(f"[success]✓ {mon_iface} → managed[/success]")
@@ -2386,11 +2372,9 @@ class PentestTool:
         except (ValueError, IndexError):
             tgt_mac = "ff:ff:ff:ff:ff:ff"
 
-        # Passer en monitor avec le canal cible (crucial pour le 5GHz)
+        # Passer en monitor
         console.print("\n[info]🔧 Mode monitor...[/info]")
-        if cur_ch and int(cur_ch) > 14:
-            console.print(f"[info]📶 Canal 5GHz {cur_ch} — passage en monitor avec fréquence MHz[/info]")
-        mon_iface = self._get_monitor_iface(selected_iface, channel=str(cur_ch) if cur_ch else None)
+        mon_iface = self.dns_monitor.enable_monitor_mode(selected_iface)
         if not mon_iface:
             console.print("[error]Impossible d\'activer le mode monitor[/error]")
             Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
@@ -2501,14 +2485,25 @@ class PentestTool:
         console.print("\n[orange1]Interfaces disponibles:[/orange1]")
         for idx, iface in enumerate(self.interfaces, 1):
             console.print(f"  {idx}. {iface['name']} ({iface['ip']})")
-        console.print("  0. Scan d'une IP/réseau spécifique")
+        console.print("  0. Scan d'une IP/réseau/domaine spécifique")
         
         iface_choice = Prompt.ask("Choisissez une option", default="1")
         
         try:
-            # Option 0: scan d'IP spécifique
+            # Option 0: scan d'IP/domaine spécifique
             if iface_choice == "0":
-                network = Prompt.ask("\n[orange1]Entrez l'IP ou le réseau (ex: 192.168.1.0/24 ou 192.168.1.1)[/orange1]")
+                network = Prompt.ask("\n[orange1]Entrez l'IP, le réseau ou le domaine[/orange1]\n"
+                                     "[dim](ex: 192.168.1.0/24, 192.168.1.1, example.com)[/dim]")
+                
+                # Nettoyer l'input : extraire le domaine/IP si c'est une URL
+                from urllib.parse import urlparse
+                if network.startswith(('http://', 'https://')):
+                    parsed = urlparse(network)
+                    network = parsed.hostname or parsed.netloc.split(':')[0]
+                    console.print(f"[dim]→ Extraction du domaine: {network}[/dim]")
+                elif ':' in network and not '/' in network:
+                    # Format "domain:port" → extraire juste le domaine
+                    network = network.split(':')[0]
             else:
                 iface_idx = int(iface_choice) - 1
                 selected_iface = self.interfaces[iface_idx]
@@ -3069,6 +3064,114 @@ class PentestTool:
             console.print("[error]Déchiffrement échoué — vérifiez la clé et le SSID[/error]")
             if r.stderr:
                 console.print(f"[dim]{r.stderr[:300]}[/dim]")
+
+    def _gobuster_menu(self):
+        """Scan d'arborescence web avec Gobuster"""
+        console.print("\n[title]═══ GOBUSTER — SCAN WEB ═══[/title]")
+        console.print("[info]📁 Énumération de répertoires/fichiers sur un serveur web[/info]\n")
+
+        # Vérifier gobuster
+        if subprocess.run(['which', 'gobuster'], capture_output=True).returncode != 0:
+            console.print("[error]Gobuster n'est pas installé[/error]")
+            console.print("[dim]sudo apt install gobuster[/dim]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # URL cible
+        target = Prompt.ask("\n[orange1]URL cible[/orange1]\n"
+                            "[dim](ex: http://example.com, example.com/admin, 192.168.1.1/repo)[/dim]")
+        
+        # Ajouter http:// si pas de protocole
+        if not target.startswith(('http://', 'https://')):
+            target = 'http://' + target
+        
+        # Normaliser : s'assurer que le chemin se termine par / sauf si c'est juste le domaine
+        from urllib.parse import urlparse
+        parsed = urlparse(target)
+        if parsed.path and not parsed.path.endswith('/'):
+            target = target + '/'
+
+        # Wordlist — chercher dans le répertoire courant
+        import os, glob
+        current_dir = os.getcwd()
+        wordlists_found = glob.glob(os.path.join(current_dir, '*.txt'))
+        
+        console.print(f"\n[orange1]Wordlists disponibles dans {current_dir}:[/orange1]")
+        if wordlists_found:
+            for idx, wl in enumerate(wordlists_found, 1):
+                console.print(f"  {idx}. {os.path.basename(wl)}")
+            console.print("  0. Chemin personnalisé")
+            wl_choice = Prompt.ask("Wordlist", default="1")
+            try:
+                if wl_choice == "0":
+                    wordlist = Prompt.ask("[orange1]Chemin de la wordlist[/orange1]")
+                else:
+                    wordlist = wordlists_found[int(wl_choice) - 1]
+            except (ValueError, IndexError):
+                wordlist = wordlists_found[0] if wordlists_found else None
+        else:
+            console.print("  [dim]Aucune wordlist .txt trouvée[/dim]")
+            wordlist = Prompt.ask("[orange1]Chemin de la wordlist[/orange1]",
+                                  default="/usr/share/wordlists/dirb/common.txt")
+
+        if not wordlist or not os.path.exists(wordlist):
+            console.print(f"[error]Wordlist introuvable: {wordlist}[/error]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # Mode
+        console.print("\n[orange1]Mode de scan:[/orange1]")
+        console.print("  1. dir  — Répertoires")
+        console.print("  2. dns  — Sous-domaines")
+        console.print("  3. vhost — Virtual hosts")
+        mode_choice = Prompt.ask("Mode", choices=["1", "2", "3"], default="1")
+        mode_map = {"1": "dir", "2": "dns", "3": "vhost"}
+        mode = mode_map[mode_choice]
+
+        # Extensions (pour mode dir)
+        extensions = ""
+        if mode == "dir":
+            ext_input = Prompt.ask("[orange1]Extensions[/orange1] (ex: php,html,txt)",
+                                   default="")
+            if ext_input:
+                extensions = f"-x {ext_input}"
+
+        # Threads
+        threads = Prompt.ask("[orange1]Threads[/orange1]", default="50")
+
+        # Construire la commande
+        cmd = ['gobuster', mode, '-u', target, '-w', wordlist, '-t', threads]
+        if extensions:
+            cmd.extend(extensions.split())
+        
+        # Options supplémentaires
+        console.print("\n[orange1]Options:[/orange1]")
+        if Prompt.ask("Suivre les redirections (301/302) ? [y/n]", default="n").lower() == 'y':
+            cmd.append('-r')
+        if Prompt.ask("Afficher les erreurs ? [y/n]", default="n").lower() == 'y':
+            cmd.append('-e')
+        
+        # Note: gobuster v3.8+ a une blacklist par défaut (404)
+        # On pourrait utiliser -s pour spécifier des codes, mais ça conflit avec la blacklist
+        # Solution : laisser le comportement par défaut (affiche tout sauf 404)
+        # Si l'utilisateur veut filtrer, il peut le faire après coup
+
+        # Exécution
+        console.print(f"\n[info]🚀 Commande: {' '.join(cmd)}[/info]")
+        console.print("[warning]Ctrl+C pour arrêter[/warning]\n")
+
+        try:
+            result = subprocess.run(cmd, text=True)
+            if result.returncode == 0:
+                console.print("\n[success]✓ Scan terminé[/success]")
+            else:
+                console.print(f"\n[warning]⚠ Scan terminé avec code {result.returncode}[/warning]")
+        except KeyboardInterrupt:
+            console.print("\n[warning]⚠ Scan interrompu[/warning]")
+        except Exception as e:
+            console.print(f"\n[error]Erreur: {e}[/error]")
+
+        Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
 
     def _fake_ap_menu(self):
         """Crée un Fake AP (Evil Twin) avec hostapd + dnsmasq"""
