@@ -2,6 +2,8 @@
 
 A comprehensive penetration testing toolkit with an interactive TUI (Text User Interface) built with Python and Rich library.
 
+![Demo](.nanachi.gif)
+
 ## Features
 
 ### Network Scanning
