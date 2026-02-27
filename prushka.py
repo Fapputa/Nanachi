@@ -116,6 +116,11 @@ class Progress:
         else:
             eta_str = "—"
         elapsed_str = f"{int(elapsed//60)}m{int(elapsed%60):02d}s"
+        ops_per_sec = done / elapsed if elapsed > 0.5 else 0
+        if ops_per_sec >= 1000:
+            ops_str = f"{ops_per_sec/1000:.1f}k ops/s"
+        else:
+            ops_str = f"{ops_per_sec:.0f} ops/s"
         top5 = sorted(self.collector.results, key=lambda x: -x[0])[:5] if self.collector else []
         best_score = top5[0][0] if top5 else 0
         GY = C.GREY
@@ -137,7 +142,7 @@ class Progress:
             f"  {c(C.RED,'─'*60)}",
             f"  Progression : {bar} {c(C.WHITE, f'{pct:.1f}%')}  {c(GY,f'({done:,}/{total:,} ops)')}",
             f"  Écoulé      : {c(C.WHITE, elapsed_str):<30}  ETA : {c(C.WHITE, eta_str)}",
-            f"  Hits        : {c(C.RED2, str(hits))}   Meilleur score : {c(C.GREEN2, f'{best_score:.1f}')}",
+            f"  Hits        : {c(C.RED2, str(hits))}   Meilleur score : {c(C.GREEN2, f'{best_score:.1f}')}   {c(C.CYAN, ops_str)}",
         ]
         if top5:
             lines.append(f"  {c(GY,'─'*40)}")
@@ -167,69 +172,72 @@ PROGRESS = Progress()
 
 def _load_words():
     import zlib, base64
-    _WORDLIST_B64 = (
-        "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"
-        "1d1LNdhrZ/hrD9mOMjqusNucrv8B8WXdsg=="
+    _D = (
+        "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"
     )
-    raw = zlib.decompress(base64.b64decode(_WORDLIST_B64)).decode()
-    words = raw.split()
-    return {w: len(words) - i for i, w in enumerate(words)}
-
+    raw = zlib.decompress(base64.b64decode(''.join(_D))).decode('utf-8')
+    out = {}
+    for line in raw.strip().split('\n'):
+        p = line.strip().split()
+        if len(p) >= 2:
+            try: out[p[0]] = int(p[1])
+            except: out[p[0]] = 200
+        elif len(p) == 1:
+            out[p[0]] = 200
+    return out
 WORD_INDEX = _load_words()
 
 CTF_KEYWORDS  = [
     "flag","password","passwd","secret","token","admin","root","access",
     "login","pass","key","cipher","hidden","crack","ctf","htb","thm","picoctf",
     "user","hash","encode","decode","exploit","shell","sudo","test",
+    # Mots CTF populaires (aussi couverts via leet-norm : MrR0b07, Fl4g, etc.)
+    "robot","mrrobot","level","welcome","hello","world","linux","windows",
+    "nmap","hack","pwn","reverse","binary","crypto","web","misc","forensic",
+    "challenge","answer","solution","input","output","result","debug","system",
+    "network","server","client","data","file","read","write","open","close",
+    "remote","local","private","public","master","super","ultra","mega",
+    # Termes techniques courants en CTF/crypto
+    "leet","speak","leet-speak","l33t","base","encode","encoded","encoded",
+    "cipher","plain","plaintext","ciphertext","decrypt","encrypt",
+    "xor","rot","hex","binary","octal","morse","ascii","unicode",
+    "salt","pepper","iv","nonce","padding","block","stream",
+    "dolphin","monkey","tiger","dragon","phoenix","cobra",
 ]
-CTF_HIGH_SCORE = {'flag','password','passwd','token','secret','key','admin','root','login','pass'}
-CTF_MED_SCORE  = {'ctf','htb','thm','picoctf','hash','encode','decode','exploit','shell','user'}
+CTF_HIGH_SCORE = {'flag','password','passwd','token','secret','key','admin','root','login','pass','robot','mrrobot'}
+CTF_MED_SCORE  = {'ctf','htb','thm','picoctf','hash','encode','decode','exploit','shell','user','hack','pwn','reverse','crypto'}
 
 # Pré-compilation des patterns regex pour find_words/detect_ctf.
 # Fait UNE FOIS au chargement — évite de recompiler à chaque appel (×50k résultats).
@@ -299,6 +307,7 @@ def is_hex_string(s):
     return bool(clean) and all(c in '0123456789abcdefABCDEF' for c in clean)
 
 STRUCTURAL_OPS = {28,29,30,31,55,56,58,64,67,68,69,70,71,80,81,82,87,88}
+BIT_OPS        = set(range(110, 129))   # ops bits : utiles depth=1, exclues depth=2+
 HASH_OPS       = {75, 76, 77}
 ENCODING_OPS   = {32, 34, 36, 38, 40, 43, 53, 59, 61, 79}
 CAESAR_OPS     = set(range(1, 26)) | {26, 27}
@@ -312,59 +321,147 @@ NATO_SET = {
     'xray','yankee','zulu'
 }
 
-# Sépare les mots par longueur pour éviter de boucler inutilement
-_WORDS_3    = None  # set des mots de 3 chars (patterns )
-_WORDS_4UP  = None  # set des mots de 4+ chars (substring)
-_PASS_PAT   = re.compile(r'(?<![a-zA-Z])pass(?![a-zA-Z])', re.IGNORECASE)
-_HAITI_PAT  = re.compile(r'(?<![a-zA-Z])haiti(?![a-zA-Z])', re.IGNORECASE)
+
+
+
+# ── Bigram log-probabilities anglais (215 bigrams, meilleure couverture) ──
+def _load_bigrams():
+    import zlib, base64
+    _raw = zlib.decompress(base64.b64decode("eNpV1luSqzgMBuB3rWJWMOX7ZTkOAUI1AQZI6JzVj7rlU/X78SuBjWXJ5nz8o/5VRkedc6BH/yOdQnQ20LT8KpiQs6N+/5UzIRhPRWImKxsd7fKeScYGRf0hcsakQKs8yYPqZKmvskrFTOX8lXI5W0PrS2RtVob6+48UR5LJ9Cgib6P3dK4iGyN/y7qLjA68hukUaRuSpukQKR8Cr2/6VcoxeEPLKEq8RJ6voM76ZOQFRSoyQwreZ0tFxkw++pjokPmS094lKrNIZZcy3fsq7aKn5UQ9JRazdZyz7iGKnHlFtxoL2ilNz4J615i3lrM7VzlOjKYiOYs2Wh+pl2+Jhqcw1PWo5a+0NZGORvNHpLzJvD7JRMjR8P6tA+qU90LKJiSaJ9SyVmnjHZVOxHk3jroVtdf3fDQq07Si9iqXdfZ0SOaDtTp4mnbULlni4tRe0Vzf4zowmuYa48JTgY4VtR+ou8R4m/lNGmVXfPK8M3TKKD5GnoWmDvWo74WsXKSr0bZXcWlzZTUaZO3eW247OjaRDTkl6grqmlCbZN4brmVLY52PM+Y5Zy8Rd6dztNVRuMm4j5YJNUm9uByydrReqEHGdCllpeg5VXGDcOZn1CXf4rgkInf/E7XVUYJL3LdLQR2SXecDNw8dBbU+UeUm4o8xgbo6u1NJa9oarSfqXr+aq5pPhpvkxRkXE/f7N6rU+XSIIdJrQa0z6qrfyWcDnyG3GfVcUcOOKmPVT3vS62gk+26zicbS9UAdL9Qs89nkokr03FB9hxpldhtD+DmzPqjuSxT4pOcn+ypuSK6XDfWSfFpvuAVp3VClyrlgHZ0v1PpGTbJ/1oag+VR8oXqpOst3hfLU96hbXYPhhlQ0DKh1Rc131C77Z/no4ZP21aGWRufRPCn1Yn/qjmv3hXrtqEm+0+TgHd85b1R3ovpGs4xpuG8s12dB9WujN2raqrit+U49UN3exG6oexO7JC9cSZ5vkm5C3WdUv6HOuobAHcjV2qMeTaxcqOWridX5fODDgW4FNTaxvX6LS47vsWtHzSdq/a7iljf0X82u5X+PRN8TajlQaxNbpSb4MnKaO+6GGmbUWKWD5btxGVBHh9p31PPWvCcdblSyfIuOI2p5o/oJdfsrbk8+yxfUV6PzQq0F9WyePOTk09lYvqfHgtrfjZon5wF1XKjhRD1kPp0c/9nR+EGVB2oqqH1EPWWndQy8ZzQsqC/Jrg7JakWPA3XeUWVALX9j3J6ePgeqfDWxGTU3T24n6mpiUx2Ff3QSn1Jv1J9Pox71aVVQXzPof8EGgCQ=")).decode()
+    _d = {}
+    for line in _raw.strip().split('\n'):
+        p = line.split()
+        if len(p)==2: _d[p[0]] = float(p[1])
+    return _d
+
+_BIGRAMS     = _load_bigrams()
+# Floor moins sévère (-3.52) pour les bigrams rares mais valides (qu, ox, br...)
+_BIGRAM_FLOOR = math.log10(0.0003)
+_BIGRAM_LOGP  = {k: math.log10(v) for k,v in _BIGRAMS.items()}
+
+def bigram_score(s):
+    """Score basé sur les bigrams anglais.
+    100 = anglais parfait (hello world), 0 = aléatoire total (XQZKVPJM).
+    Seuls les caractères alphabétiques sont considérés.
+    """
+    letters = re.sub(r'[^a-z]', '', s.lower())
+    if len(letters) < 4:
+        return 0.0
+    total = 0.0; count = 0
+    for i in range(len(letters)-1):
+        bg = letters[i:i+2]
+        total += _BIGRAM_LOGP.get(bg, _BIGRAM_FLOOR)
+        count += 1
+    if count == 0: return 0.0
+    avg = total / count
+    # -1.6 = anglais excellent, -3.5 = aléatoire/garbage
+    return max(0.0, (avg - (-3.5)) / ((-1.6) - (-3.5))) * 100.0
+
+
+# ── Leet-speak normalisation ─────────────────────────────────────────────
+_LEET_TABLE = str.maketrans({
+    '0':'o','1':'i','3':'e','4':'a','5':'s',
+    '6':'b','7':'t','8':'b','9':'g',
+    '@':'a','!':'i','$':'s','+':'t',
+})
+
+def _normalize_leet(s):
+    """MrR0b07 → mrrobot, Fl4g → flag, p@ssw0rd → password."""
+    return s.translate(_LEET_TABLE).lower()
+
 
 def _rebuild_word_sets():
-    global _WORDS_3, _WORDS_4UP
-    _WORDS_3   = {w for w in WORD_INDEX if w != 'haiti' and w != 'pass' and len(w) == 3}
+    """Construit les sets de mots pour find_words."""
+    global _WORDS_4UP, _WORDS_3CHAR, _PRESCREEN_4GRAMS, _CTF_3CHAR
+    # Tous les mots ≥4 chars : wordlist + CTF_KEYWORDS fusionnés
     _WORDS_4UP = {w for w in WORD_INDEX if w != 'haiti' and w != 'pass' and len(w) >= 4}
+    _WORDS_4UP |= {w for w in CTF_KEYWORDS if w != 'pass' and len(w) >= 4}
+    # Mots de 3 chars (CTF : ctf, htb, thm, web, pwn, key...)
+    _CTF_3CHAR = {w for w in CTF_KEYWORDS if len(w) == 3}
+    _WORDS_3CHAR = {w for w in WORD_INDEX if len(w) == 3} | _CTF_3CHAR
+    # Prescreen : 4-grams de tous les mots connus (rejet rapide du bruit)
+    _PRESCREEN_4GRAMS = set()
+    for _w in list(WORD_INDEX) + list(CTF_KEYWORDS):
+        for _i in range(len(_w) - 3):
+            _PRESCREEN_4GRAMS.add(_w[_i:_i+4])
+    for _w in _CTF_3CHAR:
+        _PRESCREEN_4GRAMS.add(_w)
 
+_CTF_3CHAR   = set()  # init avant le premier appel
+_WORDS_3CHAR = set()
 _rebuild_word_sets()  # initialise les sets au démarrage
 
-def find_words(s, search_haiti=False):
-    """
-    Logique de matching :
-    - "pass" seul : seulement si NON entouré de lettres (évite bypass/compass/ivmpass)
-    - Mots de 3 chars : frontière de mot \b (évite faux positifs massifs)
-    - Mots 4+ chars   : substring simple (assez spécifiques, attrape flagveryeasy etc.)
+# Patterns regex précompilés pour "pass" (word boundary) et "haiti"
+_PASS_PAT  = re.compile(r'(?<![a-zA-Z])pass(?![a-zA-Z])', re.IGNORECASE)
+_HAITI_PAT = re.compile(r'(?<![a-zA-Z])haiti(?![a-zA-Z])', re.IGNORECASE)
+
+
+def prescreen(s):
+    """Filtre ultra-rapide (set lookup) — rejette les chaînes sans aucun 4-gram connu.
+    Doit être appelé AVANT find_words pour économiser 99% des appels dans les boucles XOR.
+    Retourne True si la chaîne POURRAIT contenir un mot connu (peut avoir faux positifs).
     """
     lower = s.lower()
+    leet  = lower.translate(_LEET_TABLE)
+    for i in range(len(lower) - 3):
+        g = lower[i:i+4]
+        if g in _PRESCREEN_4GRAMS:
+            return True
+        g2 = leet[i:i+4]
+        if g2 in _PRESCREEN_4GRAMS:
+            return True
+    for kw in _CTF_3CHAR:
+        if kw in lower or kw in leet:
+            return True
+    return False
+
+def find_words(s, search_haiti=False):
+    """Matching complet — appeler APRÈS prescreen() pour les perfs.
+    - "pass" seul : seulement si NON entouré de lettres
+    - Mots 4+ chars : substring direct (rapide + attrape flagveryeasy etc.)
+    - Mots 3 chars  : substring direct sans regex (plus rapide, assez précis)
+    - Aussi testé sur la version leet-normalisée (MrR0b07→mrrobot, Fl4g→flag)
+    """
+    lower      = s.lower()
+    # Normalisation leet uniquement si la chaîne contient ASSEZ de lettres
+    # (évite 7777→tttt ou 0000→oooo de trouver ttt/ooo)
+    _alpha_count = sum(1 for c in s if c.isalpha())
+    _total = max(1, len(s))
+    _use_leet = (_alpha_count / _total) >= 0.30   # au moins 30% de lettres
+    leet_lower = _normalize_leet(s) if _use_leet else lower
     hits  = []
-    # pass : pattern isolé
-    if _PASS_PAT.search(s):
+    if _PASS_PAT.search(s) or (_use_leet and _PASS_PAT.search(leet_lower)):
         hits.append('pass')
-    # 3 chars : patterns regex pré-compilés
-    for w in _WORDS_3:
-        pat = _WORD_PATTERNS.get(w)
-        if pat and pat.search(lower):
-            hits.append(w)
-    # 4+ chars : substring direct (O(n) par mot, très rapide)
+    # Mots ≥4 chars (wordlist + CTF_KEYWORDS) — substring direct
     for w in _WORDS_4UP:
-        if w in lower:
+        if w in lower or (_use_leet and w in leet_lower):
             hits.append(w)
-    if search_haiti and _HAITI_PAT.search(lower):
+    # Mots 3 chars (CTF : ctf, htb, thm, web, pwn, key...) — substring
+    for w in _WORDS_3CHAR:
+        if w in lower or (_use_leet and w in leet_lower):
+            hits.append(w)
+    if search_haiti and (_HAITI_PAT.search(lower) or (_use_leet and _HAITI_PAT.search(leet_lower))):
         hits.append('haiti')
     return hits
 
 
 def detect_ctf_keywords(s):
-    """Même logique hybride que find_words pour éviter les faux positifs."""
-    lower = s.lower()
+    """Même logique hybride que find_words — teste aussi la version leet-normalisée."""
+    lower      = s.lower()
+    _alpha_r2 = sum(1 for c in s if c.isalpha()) / max(1, len(s))
+    leet_lower = _normalize_leet(s) if _alpha_r2 >= 0.30 else s.lower()
     found = []
     for kw in CTF_KEYWORDS:
         if kw == 'pass':
-            if re.search(r'(?<![a-zA-Z])pass(?![a-zA-Z])', s, re.IGNORECASE):
+            if (re.search(r'(?<![a-zA-Z])pass(?![a-zA-Z])', s, re.IGNORECASE) or
+                re.search(r'(?<![a-zA-Z])pass(?![a-zA-Z])', leet_lower, re.IGNORECASE)):
                 found.append(kw)
         elif len(kw) == 3:
             pat = _WORD_PATTERNS.get(kw)
-            if pat and pat.search(lower):
+            if pat and (pat.search(lower) or pat.search(leet_lower)):
                 found.append(kw)
         else:
-            if kw in lower:
+            if kw in lower or kw in leet_lower:
                 found.append(kw)
     return found
 
@@ -407,128 +504,164 @@ def index_coincidence(s):
     return sum(v * (v - 1) for v in freq.values()) / (n * (n - 1))
 
 def compute_score(result_str, words, has_haiti):
+    """
+    Scoring basé sur la recherche académique (practicalcryptography.com) :
+
+    1. BIGRAM FITNESS  — log-probability sur le corpus anglais (primary pour texte long)
+    2. IC SCORE        — index de coïncidence (distingue mono vs poly)
+    3. WORD BONUS      — additif pur : chaque mot trouvé = +pts proportionnels à sa longueur
+       - Mots longs (≥6 chars) : signal fort même seuls (dolphin88, password, mrrobot)
+       - Mots courts (4-5 chars) : nécessitent contexte (séparateur = : { () pour valoir qqch)
+       - Aucun mot ≤3 chars dans le dictionnaire
+
+    Formule finale :
+        score = base_fitness + word_bonus
+
+    word_bonus est ADDITIF (pas un ×) : un seul mot long = déjà ~30-50pts
+    """
     if not result_str:
         return 0.0
 
-    # Tout calculer en un seul passage sur result_str
-    lower_str = result_str.lower()
-    alpha_chars = [ch for ch in lower_str if ch.isalpha()]
-    n = len(alpha_chars)
     total_len = len(result_str)
-
-    # Printable ratio — court-circuit rapide
     n_printable = sum(1 for ch in result_str if ch.isprintable())
-    if n_printable / max(1, total_len) < 0.7:
+    if n_printable / max(1, total_len) < 0.70:
         return 0.01
 
-    # chi2 — appel direct avec la liste déjà filtrée
-    if n >= 4:
-        chi2_en = chi2_lang_fast(alpha_chars, _EN_FREQ_LIST, n)
-        chi2_fr = chi2_lang_fast(alpha_chars, _FR_FREQ_LIST, n)
-        chi2_val = min(chi2_en, chi2_fr)
-    else:
-        chi2_val = 9999.0
-    chi2_comp = max(0.0, 100.0 - chi2_val / 3.0)
+    lower_str = result_str.lower()
+    alpha_chars = [ch for ch in lower_str if 'a' <= ch <= 'z']
+    n = len(alpha_chars)
 
-    # Index de coïncidence — inline (évite re.sub + appel function)
+    # ── 1. Bigram fitness (0–80) ─────────────────────────────────────────
+    bg = bigram_score(result_str)
+
+    # ── 2. Index de coïncidence (0–20) ───────────────────────────────────
     ic = 0.038
     if n >= 6:
-        freq26 = [0] * 26
-        for ch in alpha_chars:
-            freq26[ord(ch) - 97] += 1
-        ic = sum(v * (v - 1) for v in freq26) / (n * (n - 1))
-    dist_natural = min(abs(ic - 0.065), abs(ic - 0.074))
-    ic_comp = max(0.0, 1.0 - dist_natural / 0.035) * 50.0
+        freq26 = [0]*26
+        for ch in alpha_chars: freq26[ord(ch)-97] += 1
+        ic = sum(v*(v-1) for v in freq26) / (n*(n-1))
+    dist_natural = min(abs(ic-0.065), abs(ic-0.074))
+    ic_score = max(0.0, 1.0 - dist_natural/0.040) * 20.0
 
-    base = chi2_comp * 0.65 + ic_comp * 0.35
+    # ── 3. Base fitness ───────────────────────────────────────────────────
+    base_fitness = bg * 0.70 + ic_score
 
-    alpha_ratio = n / max(1, len(result_str.replace(' ', '').replace('\n', '')))
-    base *= (0.3 + 0.7 * alpha_ratio)
+    # Pénalité texte trop court (< 15 chars alpha → signal moins fiable)
+    length_conf = min(1.0, (n + 3) / 18.0)
+    base_fitness *= length_conf
 
-    if words:
-        covered   = sum(len(w) for w in set(words))
-        cov_ratio = min(1.0, covered / max(1, n))
-        base *= (0.30 + 0.70 * cov_ratio)
-    else:
-        base *= 0.30
+    # Ratio alpha (récompense le texte majoritairement alphabétique)
+    alpha_ratio = n / max(1, len(result_str.replace(' ','').replace('\n','')))
+    base_fitness *= (0.30 + 0.70 * min(1.0, alpha_ratio * 1.4))
 
-    length_conf = min(1.0, n / 40.0)
-    base *= length_conf
-
-    # ── Entropie de Shannon ──────────────────────────────────────────────
-    # Texte anglais naturel : ~3.5–4.5 bits/char
-    # Aléatoire (Random) : ~7.5–8 bits/char
-    # On pénalise si l'entropie est trop haute (chiffré/aléatoire) ou trop basse (répétitif)
+    # ── 4. Entropie ───────────────────────────────────────────────────────
     _chars = [c for c in result_str if c.isprintable()]
     if len(_chars) >= 8:
-        _freq = {}
-        for _c in _chars: _freq[_c] = _freq.get(_c, 0) + 1
-        _n = len(_chars)
-        _entropy = -sum((v/_n) * math.log2(v/_n) for v in _freq.values())
-        # Pénalité si entropie > 5.5 (trop aléatoire)
-        if _entropy > 5.5:
-            entropy_penalty = max(0.15, 1.0 - (_entropy - 5.5) / 3.0)
-            base *= entropy_penalty
-        # Pénalité si entropie < 1.5 (trop répétitif / inutile)
-        elif _entropy < 1.5:
-            base *= max(0.2, _entropy / 1.5)
+        _fq = {}
+        for _c in _chars: _fq[_c] = _fq.get(_c,0)+1
+        _nn = len(_chars)
+        _ent = -sum((v/_nn)*math.log2(v/_nn) for v in _fq.values())
+        if _ent > 5.5:
+            base_fitness *= max(0.10, 1.0 - (_ent-5.5)/3.0)
+        elif _ent < 1.5:
+            base_fitness *= max(0.2, _ent/1.5)
 
-    # ── Pénalité NATO ─────────────────────────────────────────────────────
-    # "Whiskey Papa Tango Echo…" est un encodage lisible mais pas utile :
-    # le score de chi2 le perçoit comme "bon anglais" alors que c'est du bruit.
+    # ── 5. Pénalité NATO ──────────────────────────────────────────────────
     tokens = re.findall(r'[A-Za-z]+', result_str)
     if len(tokens) >= 4:
         nato_count = sum(1 for t in tokens if t.lower() in NATO_SET)
         nato_ratio = nato_count / len(tokens)
         if nato_ratio > 0.30:
-            # Facteur de pénalité : 100% NATO → ×0.07, 30% NATO → ×0.91
-            nato_penalty = max(0.07, 1.0 - nato_ratio * 1.4)
-            base *= nato_penalty
+            base_fitness *= max(0.07, 1.0 - nato_ratio*1.4)
 
-    # ── Bonus CTF + contexte ──────────────────────────────────────────────
-    # Règle : mot trouvé = score de base
-    # Séparateurs contextuels (: = { } [ ] espace après) = +2 pts chacun
-    # Case pure (tout lower ou tout upper ou Title) = +1 pt
-    # Case mixte aléatoire (PaSs) = pénalité -0.3×score_mot
-    tl = result_str.lower()
-    ctf_bonus = 0.0
-    for k in CTF_HIGH_SCORE:
-        if k not in tl:
-            continue
-        base_kw = 25.0
-        # Bonus séparateurs : le mot est suivi/précédé de : = { } [ ] espace
-        for pat in (k + ':', k + '=', k + '{', '{' + k, '[' + k, k + ']',
-                    k + ' ', ' ' + k):
-            if pat in tl:
-                base_kw += 2.0
-                break
-        # Bonus case : vérifier dans result_str (pas lower)
-        idx = tl.find(k)
-        raw = result_str[idx:idx+len(k)]
-        if raw == raw.lower() or raw == raw.upper() or raw == raw.title():
-            base_kw += 1.0   # case uniforme = intentionnel
-        else:
-            base_kw *= 0.7   # case chaotique = probablement bruit
-        ctf_bonus += base_kw
-    for k in CTF_MED_SCORE:
-        if k not in tl:
-            continue
-        base_kw = 8.0
-        for pat in (k + ':', k + '=', k + '{', ' ' + k, k + ' '):
-            if pat in tl:
-                base_kw += 1.5
-                break
-        idx = tl.find(k)
-        raw = result_str[idx:idx+len(k)]
-        if raw != raw.lower() and raw != raw.upper() and raw != raw.title():
-            base_kw *= 0.7
-        ctf_bonus += base_kw
-    base += ctf_bonus
+    # ── 6. WORD BONUS (additif pur) ───────────────────────────────────────
+    # Principe : chaque mot trouvé ajoute des points DIRECTEMENT au score,
+    # proportionnellement à sa longueur. Un password de 8 chars = ~50pts seul.
+    # Les mots courts (4-5 chars) pénalisés s'ils sont sans contexte.
+    tl      = result_str.lower()
+    _alpha_r = sum(1 for c in result_str if c.isalpha()) / max(1, len(result_str))
+    leet_tl  = _normalize_leet(result_str) if _alpha_r >= 0.30 else tl
 
-    if has_haiti:
-        base += 500
+    _SEP_SET  = set('=:{([_/ \t\n\r\\@!|,;')
 
-    return round(base, 3)
+    def _has_sep(fi, k):
+        kl = len(k)
+        for pat in (k+':', k+'=', k+'{', '{'+k, '('+k, k+'(',
+                    k+']', k+' ', ' '+k, k+'_', '_'+k, k+'[', '['+k):
+            if pat in fi: return True
+        i2 = fi.find(k)
+        if i2 > 0 and fi[i2-1] in _SEP_SET: return True
+        if i2>=0 and i2+kl < len(fi) and fi[i2+kl] in _SEP_SET: return True
+        return False
+
+    def _case_mult(fi, k):
+        i2 = fi.find(k)
+        if i2 < 0: return 1.0
+        raw = result_str[i2:i2+len(k)]
+        if raw == raw.lower() or raw == raw.upper(): return 1.0
+        if raw[0].isupper() and raw[1:].islower(): return 0.90
+        return 0.35   # PaSsWoRd = chaos = bruit probable
+
+    word_bonus  = 0.0
+    _found_kws  = []
+    _checked    = set()
+
+    # Combine WORD_INDEX (avec scores) + CTF_KEYWORDS (score fixe selon catégorie)
+    _all_kw = list(WORD_INDEX.items())
+    for _kw in CTF_KEYWORDS:
+        if _kw not in WORD_INDEX:
+            # Score fixe selon longueur/catégorie CTF
+            _s = 900 if _kw in CTF_HIGH_SCORE else (800 if _kw in CTF_MED_SCORE else 700)
+            _all_kw.append((_kw, _s))
+
+    for k, wscore in _all_kw:
+        if wscore < 200: continue
+        if k in _checked: continue
+        fi = tl if k in tl else (leet_tl if k in leet_tl else None)
+        if fi is None: continue
+        i2 = fi.find(k)
+        if i2 < 0: continue
+        _checked.add(k)
+        klen = len(k)
+
+        # ── Valeur de base du mot ─────────────────────────────────────────
+        # Formule : score ∝ longueur² × catégorie
+        # dolphin (7,700) → 7²×0.7 = 34.3  | password (8,900) → 8²×0.9 = 57.6
+        # flag    (4,900) → 4²×0.9 = 14.4  | token    (5,850) → 5²×0.85= 21.3
+        cat_mult = min(1.0, wscore / 900.0)
+        kw_pts   = (klen ** 2) * cat_mult
+
+        # ── Mots courts (4 chars) : pénalité sans séparateur ─────────────
+        # flag/pass/user/root seuls (exactement 4 chars) = faux positif fréquent
+        # tiger/admin/login (5 chars) : score normal mais pas de bonus sep
+        if klen == 4 and not _has_sep(fi, k):
+            kw_pts *= 0.08   # ~92% de réduction
+
+        # ── Bonus séparateur (tous les mots) ─────────────────────────────
+        if _has_sep(fi, k):
+            kw_pts += klen * 1.5   # bonus linéaire
+
+        # ── Casse ─────────────────────────────────────────────────────────
+        kw_pts *= _case_mult(fi, k)
+
+        _found_kws.append((k, i2, klen, kw_pts))
+        word_bonus += kw_pts
+
+    # ── Bonus adjacence : deux mots côte à côte (gap ≤1 char) ────────────
+    # flagveryeasy → flag+very collés → bonus fort
+    if len(_found_kws) >= 2:
+        _found_kws.sort(key=lambda x: x[1])
+        for i in range(len(_found_kws)-1):
+            k1,i1,l1,s1 = _found_kws[i]
+            k2,i2,l2,s2 = _found_kws[i+1]
+            gap = i2 - (i1+l1)
+            if 0 <= gap <= 1:   word_bonus += (l1+l2) * 2.0
+            elif gap <= 3:      word_bonus += (l1+l2) * 0.5
+
+    score = base_fitness + word_bonus
+    if has_haiti: score += 500
+    return round(score, 3)
+
 
 def _suppress_hash_detection(path, parent_str, result_str):
     if not path:
@@ -555,23 +688,41 @@ def _suppress_hash_detection(path, parent_str, result_str):
 
 class ResultCollector:
     def __init__(self):
-        self.results = []
+        self.results   = []
+        self._seen_res = {}   # result_str_normalized → index dans self.results
+                              # garde seulement le chemin le plus court
 
     def add(self, depth, path, parent_str, result_str, search_haiti):
-        # Strip le préfixe [clé='xxx'] avant la détection de mots
-        # sinon "key", "pass", "word" etc. sont trouvés dans le nom de la clé
+        # ── Prescreen ultra-rapide : rejette 99% des chaînes bruit avant tout traitement ──
         _search_str = re.sub(r"^\[clé='[^']*'\]\s*", '', result_str)
+        _check_hash = not _suppress_hash_detection(path, parent_str, result_str)
+        h_candidate = looks_like_hash(result_str) if _check_hash else None
+        # Si pas de hash ET pas de prescreen → sortie immédiate (chemin chaud)
+        if h_candidate is None and not prescreen(_search_str):
+            return False
+        # ── Déduplification par résultat normalisé ────────────────────────────
+        # Même résultat via des chemins XOR différents (XOR est commutatif/associatif)
+        # → on garde seulement le chemin le plus court
+        norm = result_str.strip().lower()
+        if norm in self._seen_res:
+            idx = self._seen_res[norm]
+            # Remplacer si chemin plus court
+            if len(path) < len(self.results[idx][2]):
+                old = self.results[idx]
+                self.results[idx] = (old[0], old[1], path, old[3], old[4], old[5], old[6], old[7], old[8])
+            return False   # pas un nouveau hit
+        # ── Matching complet uniquement si le prescreen a passé ──────────────
         words     = find_words(_search_str, search_haiti=search_haiti)
         has_haiti = search_haiti and 'haiti' in _search_str.lower()
         ctf_tags  = detect_ctf_keywords(_search_str)
-        h = None if _suppress_hash_detection(path, parent_str, result_str) else looks_like_hash(result_str)
-        interesting = bool(words) or bool(h) or has_haiti or bool(ctf_tags)
+        interesting = bool(words) or bool(h_candidate) or has_haiti or bool(ctf_tags)
         if not interesting:
             return False
         score = compute_score(result_str, words, has_haiti)
-        if h and not words and not ctf_tags:
+        if h_candidate and not words and not ctf_tags:
             score = max(score, 1.0)
-        self.results.append((score, depth, path, parent_str, result_str, words, h, has_haiti, ctf_tags))
+        self._seen_res[norm] = len(self.results)
+        self.results.append((score, depth, path, parent_str, result_str, words, h_candidate, has_haiti, ctf_tags))
         return True
 
     def display_top(self, top_n):
@@ -678,7 +829,9 @@ def from_binary(s):
     try:
         bits = s.replace(' ', '')
         if len(bits) % 8 != 0: return None
-        return ''.join(chr(int(bits[i:i+8], 2)) for i in range(0, len(bits), 8))
+        raw = bytes(int(bits[i:i+8], 2) for i in range(0, len(bits), 8))
+        try:    return raw.decode('utf-8')
+        except: return raw.decode('latin-1')
     except: return None
 def to_octal(s):    return ' '.join(oct(ord(ch))[2:] for ch in s)
 def from_octal(s):
@@ -905,6 +1058,198 @@ def rail_fence_2(s): return rail_fence_decode(s, 2)
 def rail_fence_3(s): return rail_fence_decode(s, 3)
 def rail_fence_4(s): return rail_fence_decode(s, 4)
 
+# ─── Opérations sur les bits ──────────────────────────────────────────────────
+
+def bit_not(s):
+    """NOT bit : inverse tous les bits de chaque octet (masqué sur 7 bits pour rester ASCII)."""
+    result = []
+    for ch in s:
+        o = ord(ch)
+        n = (~o) & 0x7F  # NOT masqué 7 bits → reste dans plage ASCII imprimable
+        if 32 <= n < 127:
+            result.append(chr(n))
+        else:
+            result.append(ch)  # garde le char original si résultat non imprimable
+    return ''.join(result)
+
+def bit_not_full(s):
+    """NOT bit complet sur 8 bits → retourne représentation hex."""
+    return ' '.join(f'{(~ord(ch)) & 0xFF:02X}' for ch in s)
+
+def _safe_byte_op(s, transform):
+    """Applique transform(byte) a chaque octet ; renvoie None si trop peu imprimable.
+    Optimisé : encode latin-1, applique transform sur bytearray, décode.
+    """
+    try:
+        raw = s.encode('latin-1')
+    except Exception:
+        raw = s.encode('utf-8', errors='replace')
+    result = []
+    non_print = 0
+    for b in raw:
+        nb = transform(b) & 0xFF
+        if 32 <= nb < 127:
+            result.append(chr(nb))
+        else:
+            non_print += 1
+            result.append('[x' + format(nb, '02x') + ']')
+    if non_print > len(raw) * 0.4:
+        return None
+    return ''.join(result)
+
+def circular_left_shift(s, n=1):
+    """Decalage circulaire gauche de n bits sur chaque octet (8 bits)."""
+    n = n % 8
+    return _safe_byte_op(s, lambda b: ((b << n) | (b >> (8 - n))) & 0xFF)
+
+def circular_right_shift(s, n=1):
+    """Decalage circulaire droit de n bits sur chaque octet (8 bits)."""
+    n = n % 8
+    return _safe_byte_op(s, lambda b: ((b >> n) | (b << (8 - n))) & 0xFF)
+
+def circular_left_shift_2(s): return circular_left_shift(s, 2)
+def circular_left_shift_3(s): return circular_left_shift(s, 3)
+def circular_left_shift_4(s): return circular_left_shift(s, 4)
+def circular_right_shift_2(s): return circular_right_shift(s, 2)
+def circular_right_shift_3(s): return circular_right_shift(s, 3)
+def circular_right_shift_4(s): return circular_right_shift(s, 4)
+
+def nibble_swap(s):
+    """Echange les 4 bits hauts et bas (nibble swap) de chaque octet."""
+    return _safe_byte_op(s, lambda b: ((b & 0x0F) << 4) | ((b & 0xF0) >> 4))
+
+def reverse_bits_per_byte(s):
+    """Inverse l'ordre des bits dans chaque octet."""
+    return _safe_byte_op(s, lambda b: int(f'{b:08b}'[::-1], 2))
+
+def xor_halves(s):
+    """XOR entre la premiere moitie et la seconde moitie de la chaine."""
+    if len(s) < 2:
+        return None
+    mid = len(s) // 2
+    first, second = s[:mid], s[mid:mid + len(s[:mid])]
+    result = []
+    non_print = 0
+    for a, b in zip(first, second):
+        v = ord(a) ^ ord(b)
+        if 32 <= v < 127:
+            result.append(chr(v))
+        else:
+            non_print += 1
+            result.append(f'\\x{v:02x}')
+    if non_print > mid * 0.4:
+        return None
+    return ''.join(result)
+
+def nand_op(s, key=0xFF):
+    """NAND : NOT(AND) avec masque 0xFF."""
+    return _safe_byte_op(s, lambda b: (~(b & key)) & 0xFF)
+
+def nor_op(s, key=0x00):
+    """NOR : NOT(OR) avec masque 0x00."""
+    return _safe_byte_op(s, lambda b: (~(b | key)) & 0xFF)
+
+def popcount(s):
+    """Compte le nombre de bits a 1 (popcount) pour chaque octet."""
+    return ' '.join(str(bin(ord(ch)).count('1')) for ch in s)
+
+def bits_to_binary(s):
+    """Representation binaire de chaque octet (8 bits) sans separateur."""
+    return ''.join(format(ord(ch), '08b') for ch in s)
+
+def logical_shift_left(s, n=1):
+    """Decalage logique gauche (LSL) de n bits sur chaque octet — sans rotation."""
+    return _safe_byte_op(s, lambda b: (b << n) & 0xFF)
+
+def logical_shift_right(s, n=1):
+    """Decalage logique droit (LSR) de n bits sur chaque octet — sans rotation."""
+    return _safe_byte_op(s, lambda b: (b & 0xFF) >> n)
+
+
+# ─── Détection automatique du format d'entrée ─────────────────────────────────
+
+def detect_input_format(s):
+    """Détecte le format de la chaîne d'entrée UNIQUEMENT quand c'est certain à ~100%.
+
+    Règle : si le format est ambigu (hex, base64, ascii décimaux), on NE détecte PAS.
+    Exemples d'ambiguïtés :
+      - "baffe" est du hex valide ET un mot français
+      - "test" décode en base64
+      - "65 68 72 101" sont des codes ASCII ET des nombres quelconques
+
+    Formats retenus (quasi-certitude) :
+      - Binaire  : uniquement 0/1 + longueur multiple de 8 (aucun autre sens possible)
+      - Octal    : chiffres 0-7 séparés espaces, tous < 256, au moins 3 tokens
+      - Morse    : uniquement . - / espaces, tokens valides
+      - URL enc. : contient %XX au moins 2 fois
+
+    Formats SUPPRIMÉS (ambigus) : hex, base64, ascii_codes
+    """
+    tags = []
+    stripped = s.strip()
+
+    # ── Binaire pur (~100% certain) ───────────────────────────────────────────
+    # Critères : uniquement 0 et 1 (+ espaces), longueur multiple de 8 après strip
+    bits_only = re.sub(r'\s+', '', stripped)
+    if (bits_only
+            and all(c in '01' for c in bits_only)
+            and len(bits_only) % 8 == 0
+            and len(bits_only) >= 8):
+        tags.append('binary')
+        return tags  # exclusif
+
+    # ── Morse (~100% certain) ─────────────────────────────────────────────────
+    # Critères : uniquement . - / et espaces, tokens valides morse
+    morse_clean = re.sub(r'\s+', ' ', stripped).strip()
+    if len(morse_clean) >= 3:
+        tokens = morse_clean.split()
+        if (all(re.match(r'^[\.\-]+$', t) or t == '/' for t in tokens)
+                and any(re.match(r'^[\.\-]+$', t) for t in tokens)):
+            tags.append('morse')
+            return tags
+
+    # ── URL encodé (très certain si ≥2 séquences %XX) ────────────────────────
+    if len(re.findall(r'%[0-9A-Fa-f]{2}', stripped)) >= 2:
+        tags.append('url_encoded')
+        return tags
+
+    return []  # indéterminé — on ne touche PAS à l'ordre des ops
+
+
+def reorder_ops_for_format(ops, format_tags):
+    """Réordonne les ops selon le format détecté.
+    Uniquement pour les formats certains : binary, octal, morse, url_encoded.
+    """
+    if not format_tags:
+        return ops
+
+    tag = format_tags[0]
+
+    PRIORITY = {
+        'binary':      {37},   # ← Binaire vers texte EN PREMIER
+        'morse':       {54},   # ← Morse vers texte EN PREMIER
+        'url_encoded': {60},   # URL decode EN PREMIER
+    }
+
+    priority_nums = PRIORITY.get(tag, set())
+    if not priority_nums:
+        return ops  # format non géré → ne pas toucher
+
+    # Sur du binaire pur : César/ROT/Atbash n'ont aucun sens, les pousser en dernier
+    if tag == 'binary':
+        USELESS = (set(range(1, 28)) | {51, 52, 55, 56, 67, 68}
+                   | {29, 30, 31, 64, 69, 70, 80, 81, 82, 83, 84, 85, 86, 87, 88})
+        first  = [op for op in ops if op[0] in priority_nums]
+        middle = [op for op in ops if op[0] not in priority_nums
+                  and not (isinstance(op[0], int) and op[0] in USELESS)]
+        last   = [op for op in ops if isinstance(op[0], int) and op[0] in USELESS]
+        return first + middle + last
+
+    # Autres formats : juste remonter les ops prioritaires en tête
+    first  = [op for op in ops if op[0] in priority_nums]
+    rest   = [op for op in ops if op[0] not in priority_nums]
+    return first + rest
+
 def build_operations(s, include_hash_ops=False):
     """
     Ordre INTENTIONNEL des opérations — crucial pour le mode auto :
@@ -996,6 +1341,27 @@ def build_operations(s, include_hash_ops=False):
     ops.append((83, "Chiffre de Bacon",                  bacon_cipher))
     ops.append((84, "Clavier téléphone (T9)",            phone_keypad))
 
+    # ── Groupe 6 : OPÉRATIONS SUR LES BITS ────────────────────────────────────
+    ops.append((110, "NOT bit (7 bits, ASCII)",            bit_not))
+    ops.append((111, "NOT bit complet (8 bits → hex)",     bit_not_full))
+    ops.append((112, "Circular Left Shift (ROL) ×1",       circular_left_shift))
+    ops.append((113, "Circular Left Shift (ROL) ×2",       circular_left_shift_2))
+    ops.append((114, "Circular Left Shift (ROL) ×3",       circular_left_shift_3))
+    ops.append((115, "Circular Left Shift (ROL) ×4",       circular_left_shift_4))
+    ops.append((116, "Circular Right Shift (ROR) ×1",      circular_right_shift))
+    ops.append((117, "Circular Right Shift (ROR) ×2",      circular_right_shift_2))
+    ops.append((118, "Circular Right Shift (ROR) ×3",      circular_right_shift_3))
+    ops.append((119, "Circular Right Shift (ROR) ×4",      circular_right_shift_4))
+    ops.append((120, "Nibble Swap (échange 4 bits H/B)",   nibble_swap))
+    ops.append((121, "Reverse bits par octet",             reverse_bits_per_byte))
+    ops.append((122, "XOR moitié1 ⊕ moitié2",             xor_halves))
+    ops.append((123, "NAND 0xFF",                          nand_op))
+    ops.append((124, "NOR 0x00",                           nor_op))
+    ops.append((125, "Popcount (nb bits à 1 par octet)",   popcount))
+    ops.append((126, "Représentation binaire brute",       bits_to_binary))
+    ops.append((127, "Décalage logique gauche (LSL) ×1",   logical_shift_left))
+    ops.append((128, "Décalage logique droit  (LSR) ×1",   logical_shift_right))
+
     if include_hash_ops:
         ops.append((75, "Hash MD5",    md5_hash))
         ops.append((76, "Hash SHA1",   sha1_hash))
@@ -1054,17 +1420,49 @@ def xor_bruteforce(s, collector, search_haiti, depth=0, path=None,
     if skip_repeated:
         return  # depth=2+ : on saute les clés répétées (trop lent ×N résultats)
 
-    # XOR répété 2 chars : même optimisation bytearray
-    if sb:
+    # XOR répété 2 chars — numpy quand disponible (38x plus rapide)
+    # Stratégie : calculer le XOR en vectorisé, puis prescreen avant decode/add
+    _NP = None
+    try:
+        import numpy as _np_mod
+        _NP = _np_mod
+    except ImportError:
+        pass
+
+    if sb and _NP is not None:
+        sba = _NP.frombuffer(sb, dtype=_NP.uint8)
+        slen = len(sb)
+        # Pré-construire les indices pair/impair
+        idx_even = _NP.arange(0, slen, 2)
+        idx_odd  = _NP.arange(1, slen, 2)
         for k0 in range(32, 127):
             if PROGRESS.should_quit(): return
             for k1 in range(32, 127):
                 if k0 == k1: continue
                 try:
-                    rb = bytes(sb[i] ^ (k0 if i % 2 == 0 else k1) for i in range(len(sb)))
+                    rb = sba.copy()
+                    rb[idx_even] ^= k0
+                    rb[idx_odd]  ^= k1
+                    r = rb.tobytes().decode('latin-1')
+                    # Prescreen avant add pour économiser find_words
+                    if prescreen(r):
+                        key_str = chr(k0) + chr(k1)
+                        _try_terminal(r, path + [(f"XR{k0}_{k1}", f"XOR répété clé='{key_str}'")])
+                except: pass
+    elif sb:
+        # Fallback sans numpy — même algo mais bytearray
+        ba = bytearray(sb)
+        slen = len(ba)
+        for k0 in range(32, 127):
+            if PROGRESS.should_quit(): return
+            for k1 in range(32, 127):
+                if k0 == k1: continue
+                try:
+                    rb = bytearray(ba[i] ^ (k0 if i % 2 == 0 else k1) for i in range(slen))
                     r  = rb.decode('latin-1')
-                    key_str = chr(k0) + chr(k1)
-                    _try_terminal(r, path + [(f"XR{k0}_{k1}", f"XOR répété clé='{key_str}'")])
+                    if prescreen(r):
+                        key_str = chr(k0) + chr(k1)
+                        _try_terminal(r, path + [(f"XR{k0}_{k1}", f"XOR répété clé='{key_str}'")])
                 except: pass
     else:
         for k0, k1 in itertools.product(range(32, 127), repeat=2):
@@ -1072,8 +1470,9 @@ def xor_bruteforce(s, collector, search_haiti, depth=0, path=None,
             if k0 == k1: continue
             try:
                 r = ''.join(chr(ord(s[i]) ^ (k0 if i % 2 == 0 else k1)) for i in range(len(s)))
-                key_str = chr(k0) + chr(k1)
-                _try_terminal(r, path + [(f"XR{k0}_{k1}", f"XOR répété clé='{key_str}'")])
+                if prescreen(r):
+                    key_str = chr(k0) + chr(k1)
+                    _try_terminal(r, path + [(f"XR{k0}_{k1}", f"XOR répété clé='{key_str}'")])
             except: pass
 
 def _effective_caesar_shift(path):
@@ -1090,6 +1489,9 @@ def run_recursive(s, ops, depth, max_depth, search_haiti, path, seen, collector)
     current_caesar = _effective_caesar_shift(path)
     for (num, label, func) in ops:
         if PROGRESS.should_quit(): return
+        # Ops bits : utiles seulement en depth=1 (décodage direct), exclues en depth>1
+        if depth > 1 and isinstance(num, int) and num in BIT_OPS:
+            continue
         try:
             if num in CAESAR_OPS and current_caesar is not None and depth > 1:
                 new_shift = None
@@ -1244,12 +1646,24 @@ def main():
             merged[w] = max(merged.get(w, 0), sc // 1000)
         WORD_INDEX = merged
         _rebuild_word_patterns()   # recompile avec les nouveaux mots
-        print(c(C.GREEN2, f"  📖 Wordlist : {len(ext):,} mots depuis {wordlist_path}"))
+        _rebuild_word_sets()       # recompile les sets 3/4+ chars
+        print(c(C.GREEN2, f"  📖 Wordlist : {len(ext):,} mots chargés ({wordlist_path})"))
 
     ops      = build_operations(s, include_hash_ops=search_haiti)
     ops_dict = {op[0]: op for op in ops}
     run_all  = (code == 0)
     collector = ResultCollector()
+
+    # ── Détection automatique du format d'entrée ────────────────────────────
+    fmt_tags = detect_input_format(s)
+    if fmt_tags and run_all:
+        ops = reorder_ops_for_format(ops, fmt_tags)
+        ops_dict = {op[0]: op for op in ops}
+        fmt_name = {'binary':'Binaire','hex':'Hexadécimal','base64':'Base64',
+                    'octal':'Octal','ascii_codes':'Codes ASCII',
+                    'morse':'Morse','url_encoded':'URL encodé'}.get(fmt_tags[0], fmt_tags[0])
+        print(f"  🔍 {c(C.CYAN,'Format détecté')} : {c(C.WHITE+C.BOLD, fmt_name)} "
+              f"{c(C.GREY,'— opérations correspondantes prioritaires')}")
 
     if not run_all and code == 94:
         xor_bruteforce(s, collector, search_haiti)
@@ -1286,7 +1700,9 @@ def main():
                       search_haiti=search_haiti, path=[],
                       seen=seen, collector=collector)
         if run_all:
-            xor_bruteforce(s, collector, search_haiti, depth=0, path=[])
+            # XOR brute sur l'entrée directe
+            xor_bruteforce(s, collector, search_haiti, depth=0, path=[],
+                           max_depth=recursive_depth, seen=seen, ops=selected)
     else:
         # ── Mode auto : depth=1 strict (chaque op seule), puis 2, puis 3
         #
