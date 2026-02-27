@@ -1700,6 +1700,8 @@ class PentestTool:
             menu.add_row("C", "🤝 Capture Handshake WPA")
             menu.add_row("D", "📁 Gobuster (scan web)")
             menu.add_row("E", "🔐 Hydra (bruteforce login)")
+            menu.add_row("F", "🔓 Hashcat (crack hash)")
+            menu.add_row("G", "🔮 Prushka (decrypt)")
             menu.add_row("0", "❌ Quitter")
             
             # Partie 2 du crâne
@@ -1738,6 +1740,10 @@ class PentestTool:
                 self._gobuster_menu()
             elif choice in ("E", "e"):
                 self._hydra_menu()
+            elif choice in ("F", "f"):
+                self._hashcat_menu()
+            elif choice in ("G", "g"):
+                self._prushka_menu()
             elif choice == "0":
                 console.print("[success]Au revoir! 👋[/success]")
                 break
@@ -3481,6 +3487,551 @@ class PentestTool:
                 break
             except Exception as e:
                 console.print(f"\n[error]Erreur {user}: {e}[/error]")
+
+        Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+
+    def _hashcat_menu(self):
+        """Crack hash avec hashcat (détection type via haiti + règles)"""
+        import os
+        import glob
+        
+        console.print("\n[title]═══ HASHCAT — CRACK HASH ═══[/title]")
+        console.print("[info]🔓 Craquage de hash avec détection automatique du type[/info]\n")
+
+        # Vérifier hashcat et haiti
+        missing = []
+        if subprocess.run(['which', 'hashcat'], capture_output=True).returncode != 0:
+            missing.append('hashcat')
+        
+        # Haiti peut être installé dans ~/.local/share/gem/ruby/*/bin/ ou autre
+        haiti_found = False
+        haiti_cmd = 'haiti'
+        
+        # Liste des chemins à vérifier
+        search_paths = [
+            '/usr/local/bin/haiti',
+            '/usr/bin/haiti',
+            os.path.expanduser('~/bin/haiti'),
+            os.path.expanduser('~/.local/bin/haiti'),
+        ]
+        
+        # Chercher aussi dans ~/.local/share/gem/ruby/*/bin/
+        gem_base = os.path.expanduser('~/.local/share/gem/ruby')
+        if os.path.exists(gem_base):
+            try:
+                for version_dir in os.listdir(gem_base):
+                    haiti_path = os.path.join(gem_base, version_dir, 'bin', 'haiti')
+                    if os.path.exists(haiti_path):
+                        search_paths.insert(0, haiti_path)
+            except Exception:
+                pass
+        
+        # Chercher aussi dans ~/.gem/ruby/*/bin/
+        gem_base2 = os.path.expanduser('~/.gem/ruby')
+        if os.path.exists(gem_base2):
+            try:
+                for version_dir in os.listdir(gem_base2):
+                    haiti_path = os.path.join(gem_base2, version_dir, 'bin', 'haiti')
+                    if os.path.exists(haiti_path):
+                        search_paths.insert(0, haiti_path)
+            except Exception:
+                pass
+        
+        # Tester chaque chemin
+        for path in search_paths:
+            if os.path.exists(path) and os.access(path, os.X_OK):
+                haiti_found = True
+                haiti_cmd = path
+                break
+        
+        # Fallback: essayer which
+        if not haiti_found:
+            try:
+                result = subprocess.run(['which', 'haiti'], 
+                                       capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout.strip():
+                    haiti_cmd = result.stdout.strip()
+                    haiti_found = True
+            except Exception:
+                pass
+
+        
+        if not haiti_found:
+            missing.append('haiti')
+        
+        if missing:
+            console.print(f"[error]Outils manquants: {', '.join(missing)}[/error]")
+            if 'hashcat' in missing:
+                console.print("[dim]sudo apt install hashcat[/dim]")
+            if 'haiti' in missing:
+                console.print("[dim]gem install haiti-hash[/dim]")
+                console.print("[dim]Puis ajouter ~/.local/share/gem/ruby/*/bin au PATH[/dim]")
+            
+            # Proposer de continuer sans haiti
+            if 'haiti' in missing and 'hashcat' not in missing:
+                skip_haiti = Prompt.ask("[orange1]Continuer sans haiti (mode manuel) ?[/orange1] [y/n]", default="n")
+                if skip_haiti.lower() != 'y':
+                    Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+                    return
+                # Continuer en mode manuel
+                haiti_found = False
+            else:
+                Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+                return
+
+        # ── ÉTAPE 1 : SAISIE DU HASH ──────────────────────────────────────────
+        console.print("[orange1]═══ ÉTAPE 1 : HASH À CRACKER ═══[/orange1]\n")
+        
+        hash_input = Prompt.ask("[orange1]Hash[/orange1] (ou chemin vers fichier)")
+        
+        # Vérifier si c'est un fichier
+        if os.path.exists(hash_input):
+            hash_file = hash_input
+            with open(hash_file, 'r') as f:
+                hash_value = f.read().strip()
+            console.print(f"[success]✓ Hash lu depuis {hash_file}[/success]")
+        else:
+            hash_value = hash_input.strip()
+            # Créer un fichier temporaire pour hashcat
+            hash_file = f"/tmp/nanachi_hash_{int(time.time())}.txt"
+            with open(hash_file, 'w') as f:
+                f.write(hash_value)
+            cleanup_manager.register_temp_file(hash_file)
+
+        # ── ÉTAPE 2 : DÉTECTION TYPE AVEC HAITI ───────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 2 : DÉTECTION TYPE ═══[/orange1]\n")
+        console.print(f"[info]🔍 Analyse du hash avec haiti...[/info]")
+        
+        # Parser haiti si disponible
+        hashcat_modes = []
+        
+        if haiti_found:
+            try:
+                haiti_result = subprocess.run(
+                    [haiti_cmd, hash_value],
+                    capture_output=True, text=True, timeout=10
+                )
+                
+                # Afficher stdout ET stderr pour debug
+                if haiti_result.stdout:
+                    console.print(haiti_result.stdout)
+                if haiti_result.stderr:
+                    console.print(f"[dim]{haiti_result.stderr}[/dim]")
+                
+                # Parser la sortie de haiti pour extraire les types hashcat
+                for line in haiti_result.stdout.split('\n'):
+                    # Haiti format: "MD5 [HC: 0] [JtR: raw-md5]"
+                    if '[HC:' in line:
+                        import re
+                        m = re.search(r'\[HC:\s*(\d+)\]', line)
+                        if m:
+                            mode = m.group(1)
+                            # Extraire aussi le nom du hash
+                            name = line.split('[HC:')[0].strip()
+                            hashcat_modes.append({'mode': mode, 'name': name})
+                
+                if not hashcat_modes:
+                    console.print("[warning]⚠ Haiti n'a pas pu identifier le type de hash[/warning]")
+            
+            except Exception as e:
+                console.print(f"[error]Erreur haiti: {e}[/error]")
+        
+        # Si pas de modes détectés (pas de haiti ou échec), mode manuel
+        if not hashcat_modes:
+            # Heuristique simple : détecter par longueur
+            hash_len = len(hash_value.strip())
+            detected_types = []
+            
+            console.print(f"\n[info]Détection heuristique (longueur: {hash_len})...[/info]")
+            
+            if hash_len == 32:
+                detected_types = [
+                    {'mode': '0', 'name': 'MD5'},
+                    {'mode': '1000', 'name': 'NTLM'},
+                ]
+            elif hash_len == 40:
+                detected_types = [
+                    {'mode': '100', 'name': 'SHA1'},
+                    {'mode': '300', 'name': 'MySQL4.1/MySQL5'},
+                ]
+            elif hash_len == 64:
+                detected_types = [
+                    {'mode': '1400', 'name': 'SHA256'},
+                ]
+            elif hash_len == 128:
+                detected_types = [
+                    {'mode': '1700', 'name': 'SHA512'},
+                ]
+            elif hash_len == 16:
+                detected_types = [
+                    {'mode': '5100', 'name': 'Half MD5'},
+                ]
+            
+            if detected_types:
+                console.print("[success]Types probables détectés:[/success]")
+                for idx, h in enumerate(detected_types, 1):
+                    console.print(f"  {idx}. [white]{h['name']}[/white] (mode {h['mode']})")
+                
+                try:
+                    choice = Prompt.ask("\n[orange1]Sélectionner un type ou 'm' pour mode manuel[/orange1]", default="1")
+                    if choice.lower() == 'm':
+                        detected_types = []
+                    else:
+                        idx = int(choice) - 1
+                        hashcat_modes = [detected_types[idx]]
+                except (ValueError, IndexError):
+                    hashcat_modes = [detected_types[0]]
+            
+            # Si toujours pas de mode, passer en mode manuel complet
+            if not hashcat_modes:
+                console.print("\n[info]Mode manuel — saisir code hashcat[/info]")
+                console.print("[dim]Tapez 'h' pour afficher la liste des codes[/dim]\n")
+                
+                manual_mode = Prompt.ask("[orange1]Mode hashcat[/orange1] (h pour liste)", default="0")
+                
+                if manual_mode.lower() == 'h':
+                    # Afficher la table des modes hashcat courants
+                    from rich.table import Table
+                    hash_table = Table(title="Modes Hashcat Courants", box=box.ROUNDED)
+                    hash_table.add_column("Code", style="cyan", width=6)
+                    hash_table.add_column("Type", style="white", overflow="fold")
+                    
+                    common_modes = [
+                        ("0", "MD5"),
+                        ("10", "md5($pass.$salt)"),
+                        ("20", "md5($salt.$pass)"),
+                        ("100", "SHA1"),
+                        ("110", "sha1($pass.$salt)"),
+                        ("120", "sha1($salt.$pass)"),
+                        ("400", "phpass, WordPress, Joomla"),
+                        ("500", "md5crypt, MD5 (Unix)"),
+                        ("900", "MD4"),
+                        ("1000", "NTLM"),
+                        ("1100", "Domain Cached Credentials (DCC)"),
+                        ("1400", "SHA256"),
+                        ("1410", "sha256($pass.$salt)"),
+                        ("1420", "sha256($salt.$pass)"),
+                        ("1700", "SHA512"),
+                        ("1710", "sha512($pass.$salt)"),
+                        ("1720", "sha512($salt.$pass)"),
+                        ("1800", "sha512crypt (Unix)"),
+                        ("2500", "WPA/WPA2"),
+                        ("3000", "LM"),
+                        ("3200", "bcrypt"),
+                        ("5600", "NetNTLMv2"),
+                        ("7500", "Kerberos 5 AS-REQ"),
+                        ("13100", "Kerberos 5 TGS-REP"),
+                        ("16500", "JWT (JSON Web Token)"),
+                    ]
+                    
+                    for code, name in common_modes:
+                        hash_table.add_row(code, name)
+                    
+                    console.print(hash_table)
+                    console.print("\n[dim]Liste complète: https://hashcat.net/wiki/doku.php?id=example_hashes[/dim]\n")
+                    
+                    manual_mode = Prompt.ask("[orange1]Mode hashcat[/orange1]", default="0")
+                
+                hashcat_modes = [{'mode': manual_mode, 'name': 'Manuel'}]
+
+
+
+        # Sélection du type
+        if len(hashcat_modes) > 1:
+            console.print("\n[orange1]Types détectés:[/orange1]")
+            for idx, h in enumerate(hashcat_modes, 1):
+                console.print(f"  {idx}. [white]{h['name']}[/white] (mode {h['mode']})")
+            
+            try:
+                type_idx = int(Prompt.ask("[orange1]Type à utiliser[/orange1]", default="1"))
+                selected_mode = hashcat_modes[type_idx - 1]['mode']
+            except (ValueError, IndexError):
+                selected_mode = hashcat_modes[0]['mode']
+        else:
+            selected_mode = hashcat_modes[0]['mode']
+            console.print(f"[success]✓ Mode: {hashcat_modes[0]['name']} ({selected_mode})[/success]")
+
+        # ── ÉTAPE 3 : WORDLIST ────────────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 3 : WORDLIST ═══[/orange1]\n")
+        
+        current_dir = os.getcwd()
+        wordlists = glob.glob(os.path.join(current_dir, '*.txt'))
+        wordlists += glob.glob(os.path.join(current_dir, '*.dic'))
+        
+        console.print(f"[orange1]Wordlists dans {current_dir}:[/orange1]")
+        if wordlists:
+            for idx, wl in enumerate(wordlists, 1):
+                console.print(f"  {idx}. {os.path.basename(wl)}")
+            console.print("  0. Chemin personnalisé")
+            wl_choice = Prompt.ask("Wordlist", default="1")
+            try:
+                if wl_choice == "0":
+                    wordlist = Prompt.ask("[orange1]Chemin wordlist[/orange1]")
+                else:
+                    wordlist = wordlists[int(wl_choice) - 1]
+            except (ValueError, IndexError):
+                wordlist = wordlists[0] if wordlists else None
+        else:
+            wordlist = Prompt.ask("[orange1]Chemin wordlist[/orange1]")
+
+        if not wordlist or not os.path.exists(wordlist):
+            console.print(f"[error]Wordlist introuvable: {wordlist}[/error]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        # ── ÉTAPE 4 : RÈGLES HASHCAT ──────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 4 : RÈGLES ═══[/orange1]\n")
+        console.print("[dim]Les règles modifient les mots de la wordlist[/dim]")
+        console.print("[dim]Exemples: +2 char random, majuscules, leet speak...[/dim]\n")
+        
+        console.print("[orange1]Options:[/orange1]")
+        console.print("  1. Aucune règle (attaque directe)")
+        console.print("  2. best64.rule (règles courantes)")
+        console.print("  3. Append 2 random chars (?a?a)")
+        console.print("  4. Append 3 random chars (?a?a?a)")
+        console.print("  5. Append 4 random chars (?a?a?a?a)")
+        console.print("  6. Règle personnalisée")
+        
+        rule_choice = Prompt.ask("[orange1]Règle[/orange1]", default="1")
+        
+        rule_args = []
+        if rule_choice == "2":
+            # best64.rule (généralement dans /usr/share/hashcat/rules/)
+            rule_file = "/usr/share/hashcat/rules/best64.rule"
+            if os.path.exists(rule_file):
+                rule_args = ['-r', rule_file]
+            else:
+                console.print(f"[warning]⚠ {rule_file} introuvable, utilisation sans règle[/warning]")
+        elif rule_choice == "3":
+            # Append 2 chars: passe en mode masque hybride
+            rule_args = ['-a', '6', wordlist, '?a?a']
+            wordlist = None  # Ne pas passer -w en mode hybride
+        elif rule_choice == "4":
+            rule_args = ['-a', '6', wordlist, '?a?a?a']
+            wordlist = None
+        elif rule_choice == "5":
+            rule_args = ['-a', '6', wordlist, '?a?a?a?a']
+            wordlist = None
+        elif rule_choice == "6":
+            custom_rule = Prompt.ask("[orange1]Règle personnalisée[/orange1] (ex: best64.rule ou -a 6 ?a?a)")
+            rule_args = custom_rule.split()
+
+        # ── ÉTAPE 5 : OPTIONS SUPPLÉMENTAIRES ─────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 5 : OPTIONS ═══[/orange1]\n")
+        
+        show_potfile = Prompt.ask("[orange1]Afficher les hashs déjà crackés (potfile) ?[/orange1] [y/n]", default="n")
+        if show_potfile.lower() == 'y':
+            # Juste afficher le potfile
+            potfile = os.path.expanduser("~/.hashcat/hashcat.potfile")
+            if os.path.exists(potfile):
+                console.print(f"\n[success]Contenu du potfile:[/success]")
+                with open(potfile, 'r') as f:
+                    console.print(f.read())
+            else:
+                console.print("[warning]Aucun hash cracké précédemment[/warning]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        workload = Prompt.ask("[orange1]Workload[/orange1] (1=low, 2=default, 3=high, 4=insane)", 
+                             default="2")
+        
+        # Backend selection (CUDA/OpenCL)
+        console.print("\n[orange1]Backend (GPU):[/orange1]")
+        console.print("  1. Auto (laisser hashcat choisir)")
+        console.print("  2. Ignorer CUDA (--backend-ignore-cuda)")
+        console.print("  3. Ignorer OpenCL (--backend-ignore-opencl)")
+        console.print("  4. CPU seulement (--backend-ignore-cuda --backend-ignore-opencl)")
+        backend_choice = Prompt.ask("[orange1]Backend[/orange1]", default="1")
+        
+        backend_args = []
+        if backend_choice == "2":
+            backend_args.append('--backend-ignore-cuda')
+        elif backend_choice == "3":
+            backend_args.append('--backend-ignore-opencl')
+        elif backend_choice == "4":
+            backend_args.extend(['--backend-ignore-cuda', '--backend-ignore-opencl'])
+
+        # ── ÉTAPE 6 : EXÉCUTION ───────────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 6 : CRACKING ═══[/orange1]\n")
+        
+        # Construction de la commande
+        cmd = ['hashcat', '-m', selected_mode, '-w', workload, hash_file]
+        
+        # Backend
+        cmd.extend(backend_args)
+        
+        if wordlist:
+            cmd.append(wordlist)
+        
+        cmd.extend(rule_args)
+        
+        # Options utiles
+        cmd.extend(['--status', '--status-timer=5'])  # Afficher progression toutes les 5s
+        
+        console.print(f"[info]🚀 Commande: {' '.join(cmd)}[/info]")
+        console.print("[warning]Ctrl+C pour arrêter[/warning]\n")
+
+        try:
+            result = subprocess.run(cmd)
+            
+            if result.returncode == 0:
+                console.print("\n[success]✓ Hash cracké ![/success]")
+                # Afficher le résultat
+                show_cmd = ['hashcat', '-m', selected_mode, hash_file, '--show']
+                show_result = subprocess.run(show_cmd, capture_output=True, text=True)
+                if show_result.stdout.strip():
+                    console.print(f"\n[bold green]{show_result.stdout}[/bold green]")
+            else:
+                console.print(f"\n[warning]⚠ Terminé avec code {result.returncode}[/warning]")
+                
+        except KeyboardInterrupt:
+            console.print("\n[warning]⚠ Cracking interrompu[/warning]")
+        except Exception as e:
+            console.print(f"\n[error]Erreur: {e}[/error]")
+
+        Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+
+    def _prushka_menu(self):
+        """Décryptage automatique avec Prushka (CTF/forensics)"""
+        import os
+        
+        console.print("\n[title]═══ PRUSHKA — DECRYPT ═══[/title]")
+        console.print("[info]🔮 Décryptage automatique CTF/forensics[/info]\n")
+
+        # Vérifier prushka
+        prushka_path = None
+        
+        # Chercher prushka.py dans le répertoire courant
+        if os.path.exists('./prushka.py'):
+            prushka_path = './prushka.py'
+        elif os.path.exists(os.path.expanduser('~/prushka.py')):
+            prushka_path = os.path.expanduser('~/prushka.py')
+        elif os.path.exists('/usr/local/bin/prushka.py'):
+            prushka_path = '/usr/local/bin/prushka.py'
+        
+        if not prushka_path:
+            console.print("[error]prushka.py n'est pas trouvé[/error]")
+            console.print("[dim]Placez prushka.py dans le répertoire courant ou ~/[/dim]")
+            Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+            return
+
+        console.print(f"[success]✓ prushka.py trouvé : {prushka_path}[/success]\n")
+
+        # ── ÉTAPE 1 : INPUT (CHAÎNE OU FICHIER) ───────────────────────────────
+        console.print("[orange1]═══ ÉTAPE 1 : DONNÉES À DÉCRYPTER ═══[/orange1]\n")
+        
+        input_choice = Prompt.ask(
+            "[orange1]Type d'entrée[/orange1]\n"
+            "[dim]  1. Chaîne directe\n"
+            "  2. Fichier[/dim]",
+            choices=["1", "2"], default="1"
+        )
+        
+        if input_choice == "1":
+            data_input = Prompt.ask("[orange1]Chaîne à décrypter[/orange1]")
+            file_mode = False
+        else:
+            data_input = Prompt.ask("[orange1]Chemin du fichier[/orange1]")
+            if not os.path.exists(data_input):
+                console.print(f"[error]Fichier introuvable: {data_input}[/error]")
+                Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
+                return
+            file_mode = True
+
+        # ── ÉTAPE 2 : RÉCURSION ───────────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 2 : RÉCURSION ═══[/orange1]\n")
+        console.print("[dim]Nombre de niveaux d'encodage à tester[/dim]")
+        console.print("[dim]1 = rapide, 2 = moyen, 3+ = lent[/dim]\n")
+        
+        recursion = Prompt.ask("[orange1]Récursion[/orange1]", default="2")
+
+        # ── ÉTAPE 3 : TOP RÉSULTATS ───────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 3 : AFFICHAGE ═══[/orange1]\n")
+        
+        top_n = Prompt.ask("[orange1]Nombre de résultats à afficher[/orange1] (1-100)", default="10")
+
+        # ── ÉTAPE 4 : DÉTECTION HASH ──────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 4 : OPTIONS ═══[/orange1]\n")
+        console.print("[warning]⚠ La détection de hash est lente[/warning]")
+        
+        detect_hash = Prompt.ask("[orange1]Activer détection hash (-h) ?[/orange1] [y/n]", default="n")
+
+        # ── ÉTAPE 5 : WORDLIST (OPTIONNEL) ────────────────────────────────────
+        use_wordlist = Prompt.ask("[orange1]Utiliser une wordlist ?[/orange1] [y/n]", default="n")
+        
+        wordlist_path = None
+        if use_wordlist.lower() == 'y':
+            import glob
+            current_dir = os.getcwd()
+            wordlists = glob.glob(os.path.join(current_dir, '*.txt'))
+            
+            if wordlists:
+                console.print(f"\n[orange1]Wordlists dans {current_dir}:[/orange1]")
+                for idx, wl in enumerate(wordlists, 1):
+                    console.print(f"  {idx}. {os.path.basename(wl)}")
+                console.print("  0. Chemin personnalisé")
+                
+                wl_choice = Prompt.ask("Wordlist", default="0")
+                try:
+                    if wl_choice == "0":
+                        wordlist_path = Prompt.ask("[orange1]Chemin wordlist[/orange1]")
+                    else:
+                        wordlist_path = wordlists[int(wl_choice) - 1]
+                except (ValueError, IndexError):
+                    pass
+            else:
+                wordlist_path = Prompt.ask("[orange1]Chemin wordlist[/orange1]")
+
+        # ── ÉTAPE 6 : EXÉCUTION ───────────────────────────────────────────────
+        console.print("\n[orange1]═══ ÉTAPE 6 : DÉCRYPTAGE ═══[/orange1]\n")
+
+        # Construction de la commande
+        cmd = ['python3', prushka_path]
+        
+        if file_mode:
+            # Mode fichier : lire le contenu et le passer en argument
+            with open(data_input, 'r') as f:
+                content = f.read().strip()
+            cmd.append(content)
+        else:
+            # Mode chaîne directe
+            cmd.append(data_input)
+        
+        # Code opération (0 = toutes)
+        cmd.append('0')
+        
+        # Récursion
+        cmd.extend(['-r', recursion])
+        
+        # Top N résultats
+        cmd.extend(['-v', top_n])
+        
+        # Hash detection
+        if detect_hash.lower() == 'y':
+            cmd.append('-h')
+        
+        # Wordlist
+        if wordlist_path and os.path.exists(wordlist_path):
+            cmd.extend(['-w', wordlist_path])
+
+        console.print(f"[info]🚀 Commande: {' '.join(cmd)}[/info]")
+        console.print("[dim]Pendant l'exécution:[/dim]")
+        console.print("[dim]  's' = afficher progression[/dim]")
+        console.print("[dim]  'q' = arrêter[/dim]")
+        console.print("[warning]Ctrl+C pour arrêter[/warning]\n")
+
+        try:
+            result = subprocess.run(cmd)
+            
+            if result.returncode == 0:
+                console.print("\n[success]✓ Décryptage terminé[/success]")
+            else:
+                console.print(f"\n[warning]⚠ Terminé avec code {result.returncode}[/warning]")
+                
+        except KeyboardInterrupt:
+            console.print("\n[warning]⚠ Décryptage interrompu[/warning]")
+        except Exception as e:
+            console.print(f"\n[error]Erreur: {e}[/error]")
 
         Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
 
