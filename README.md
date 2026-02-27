@@ -6,6 +6,26 @@ A comprehensive penetration testing toolkit with an interactive TUI (Text User I
 
 ## Features
 
+## Prushka
+![Demo](.prushka.gif)
+### How it work
+Prushka will take the content you provide and will attempt to reverse the ciphering by testing about a hundred encryption methods. Each time, Prushka will analyse the unciphered string, and will attribute a score to it, the score is determined by the antropy and the presence or not of common words in the string such as password flag ... 
+###made and use for decrypting strings 
+### OPTIONS:
+- `-r` recursive mode combine differents encryptions method to decrypt hard-ciphered messages
+- `-v` show a top of the highest decryption scores
+- `-h` add a detection of hashes type for each string decrypted using haiti
+- `-w` add a wordlist that detects words and add a more accurate score
+- `-f` analyse instead of a string the content of a file
+### USAGE:
+- `-r "x"` where x is the number of recursion. When 3 < x it can take a serious amount of time
+- `-v "x"` where x is the Top x, for example -v 10 shows the top 10 highest score
+- `-w "wordlist"` where wordlist is the path of the wordlist
+- `-f "file"` where file is the path of the file
+### WHEN RUNNING
+- `s` typing s permit to see the status, time remaining, top 5 ...
+- `q` typing q permit you to quit and print the actual state of the top
+
 ### Network Scanning
 - **Nmap Integration**: Full network discovery with timing controls
 - **WiFi Scanner**: Detect and analyze wireless networks with signal strength and security info
@@ -137,7 +157,7 @@ Connects to a WiFi network and scans for devices on the local network using nmap
    - 0 = Continuous (press ENTER to stop)
    - N = Send N frames then stop
 ```
-
+  
 ## DNS Monitoring
 
 Captures DNS queries on local network to identify:
