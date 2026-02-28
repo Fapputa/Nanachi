@@ -25,6 +25,18 @@ Prushka will take the content you provide and will attempt to reverse the cipher
 ### WHEN RUNNING
 - `s` typing s permit to see the status, time remaining, top 5 ...
 - `q` typing q permit you to quit and print the actual state of the top
+### /!\ Good to Know (Power)
+analysing with the option -h slows down a lot the search
+analysing with a recusrion above 3 is often an impossible task cause the difference of time-search between recursions is a X to the power ok recursions:
+- 1 recursion ~ 2 to 3 seconds
+- 2 recursions ~ 10 to 25 minutes
+- 3 recursions ~ 900 minutes to 2700 minutes
+- 4 and more recursions ~ 60 000 minutes and more
+You usually dont need to wait the end to find the result, oftenly the result is showed the first 10% of the search
+but 10% of 60 000 is still 6 000 minutes
+### /!\ Good to Know (Score)
+How to spot a good score ?
+Basically you dont need most of the time to watch the score the result is oftenly obvious in the top, the score is mostly made for the computer.
 
 ### Network Scanning
 - **Nmap Integration**: Full network discovery with timing controls
