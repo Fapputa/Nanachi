@@ -176,7 +176,17 @@ SKULL_PART2 = r"""      ._###ZZ @  .  @  Z####`
       ##'#.\_/.      _.\ZZ    |
       ##....../      |..\Z    |;
       / `-.___/      |../Z    |
-      |    ZZ |      |./  Z   |;;"""
+      |    ZZ |      |./  Z   |;;
+     ;|Z    /x\____/x     Z   |;
+     ;\ Z   /xxxxxxxxxxx\   Z __|
+      ;\Z /'##xxxxxxxx###`\__Z .\_
+      Z|/#| ####xxxx####  |##\Z ..|
+   __Z /#/   ####x####    |###\Z_..|
+  /NN\|#|      `###`      \###|NN\..\
+  |NN|\#\  _____.......  _/\/ \__/..|
+  `-'  `-..###########\_/##/  /.../
+         `|#####/   \####|   /../
+           .xxx#|   |xxx.   |./"""
 
 
 class OUILookup:
@@ -3989,10 +3999,10 @@ class PentestTool:
         cmd = ['python3', prushka_path]
         
         if file_mode:
-            # Mode fichier : lire le contenu et le passer en argument
-            with open(data_input, 'r') as f:
-                content = f.read().strip()
-            cmd.append(content)
+            # Mode fichier : passer le chemin avec -f (lecture binaire dans prushka)
+            # NE PAS lire le contenu ici — les fichiers CTF contiennent des bytes
+            # non-imprimables (0x7F, 0x80+) qui seraient corrompus en UTF-8
+            cmd.extend(['-f', data_input])
         else:
             # Mode chaîne directe
             cmd.append(data_input)
