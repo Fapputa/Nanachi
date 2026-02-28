@@ -25,6 +25,8 @@ Prushka will take the content you provide and will attempt to reverse the cipher
 ### WHEN RUNNING
 - `s` typing s permit to see the status, time remaining, top 5 ...
 - `q` typing q permit you to quit and print the actual state of the top
+### /!\ Good to Know (Misc)
+Its way better to select a file instead ok a string that comes from your clipboard, sometimes clipboard will erase or change some characters
 ### /!\ Good to Know (Power)
 analysing with the option -h slows down a lot the search
 analysing with a recusrion above 3 is often an impossible task cause the difference of time-search between recursions is a X to the power ok recursions:
