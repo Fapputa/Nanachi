@@ -195,10 +195,18 @@ class OUILookup:
     oui_database = {}
     
     @classmethod
-    def load_oui_file(cls, filepath: str = "oui.txt"):
+    def load_oui_file(cls, filepath: str = None):
         """Charge le fichier OUI"""
         if cls.oui_database:  # Déjà chargé
             return
+        
+        # Chemin par défaut : /home/$USER/nanachi/oui.txt (même avec sudo)
+        if filepath is None:
+            real_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+            if real_user and real_user != 'root':
+                filepath = f'/home/{real_user}/nanachi/oui.txt'
+            else:
+                filepath = os.path.expanduser("~/nanachi/oui.txt")
         
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -744,7 +752,13 @@ echo "════════════════════════�
         console.print(f"[info]Domaines uniques: {len(domain_counts)}[/info]")
         
         # Sauvegarder dans un fichier
-        filename = f"dns_capture_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        real_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+        if real_user and real_user != 'root':
+            nanachi_dir = f'/home/{real_user}/nanachi'
+        else:
+            nanachi_dir = os.path.expanduser("~/nanachi")
+        os.makedirs(nanachi_dir, exist_ok=True)  # Créer le répertoire s'il n'existe pas
+        filename = os.path.join(nanachi_dir, f"dns_capture_{time.strftime('%Y%m%d_%H%M%S')}.csv")
         try:
             with open(filename, 'w', newline='', encoding='utf-8') as f:
                 fieldnames = ['time', 'source_mac', 'source_ip', 'dest_ip', 'bssid', 'manufacturer', 'query', 'type']
@@ -3911,17 +3925,32 @@ class PentestTool:
         # Vérifier prushka
         prushka_path = None
         
-        # Chercher prushka.py dans le répertoire courant
-        if os.path.exists('./prushka.py'):
-            prushka_path = './prushka.py'
-        elif os.path.exists(os.path.expanduser('~/prushka.py')):
-            prushka_path = os.path.expanduser('~/prushka.py')
-        elif os.path.exists('/usr/local/bin/prushka.py'):
-            prushka_path = '/usr/local/bin/prushka.py'
+        # Obtenir le vrai user (même avec sudo)
+        real_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+        if real_user and real_user != 'root':
+            nanachi_dir = f'/home/{real_user}/nanachi'
+        else:
+            nanachi_dir = os.path.expanduser('~/nanachi')
+        
+        # Chercher prushka.py
+        search_paths = [
+            os.path.join(nanachi_dir, 'prushka.py'),  # Priorité 1: /home/$USER/nanachi/
+            './prushka.py',                            # Priorité 2: répertoire courant
+            os.path.expanduser('~/prushka.py'),       # Priorité 3: home
+            '/usr/local/bin/prushka.py',              # Priorité 4: système
+        ]
+        
+        for path in search_paths:
+            if os.path.exists(path):
+                prushka_path = path
+                break
         
         if not prushka_path:
             console.print("[error]prushka.py n'est pas trouvé[/error]")
-            console.print("[dim]Placez prushka.py dans le répertoire courant ou ~/[/dim]")
+            console.print("[dim]Chemins testés :[/dim]")
+            for p in search_paths:
+                console.print(f"[dim]  - {p}[/dim]")
+            console.print("[dim]Placez prushka.py dans ~/nanachi/ ou le répertoire courant[/dim]")
             Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
             return
 
@@ -4360,13 +4389,20 @@ button{width:100%;padding:12px;background:#0070c9;color:white;border:none;border
         """Menu Payloads"""
         console.print("\n[title]═══ GESTIONNAIRE DE PAYLOADS ═══[/title]")
         
+        # Chemins relatifs : /home/$USER/nanachi/*.csv (même avec sudo)
+        real_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+        if real_user and real_user != 'root':
+            nanachi_dir = f'/home/{real_user}/nanachi'
+        else:
+            nanachi_dir = os.path.expanduser("~/nanachi")
+        
         payload_files = {
-            "1": "jspayload.csv",
-            "2": "sqlpayload.csv",
-            "3": "phppayload.csv",
-            "4": "htmlpayload.csv",
-            "5": "lfipayload.csv",
-            "6": "revshellpayload.csv",
+            "1": os.path.join(nanachi_dir, "jspayload.csv"),
+            "2": os.path.join(nanachi_dir, "sqlpayload.csv"),
+            "3": os.path.join(nanachi_dir, "phppayload.csv"),
+            "4": os.path.join(nanachi_dir, "htmlpayload.csv"),
+            "5": os.path.join(nanachi_dir, "lfipayload.csv"),
+            "6": os.path.join(nanachi_dir, "revshellpayload.csv"),
         }
         
         console.print("\n[orange1]Fichiers de payloads:[/orange1]")
