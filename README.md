@@ -28,8 +28,8 @@ Prushka will take the content you provide and will attempt to reverse the cipher
 ### /!\ Good to Know (Misc)
 Its way better to select a file instead of a string that comes from your clipboard, sometimes clipboard will erase or change some characters
 ### /!\ Good to Know (Power)
-analysing with the option -h slows down a lot the search
-analysing with a recusrion above 3 is often an impossible task cause the difference of time-search between recursions is a X to the power ok recursions:
+Analysing with the option -h slows down a lot the search.
+Analysing with a recusrion above 3 is often an impossible task cause the difference of time-search between recursions is a X to the power of recursions:
 - 1 recursion ~ 2 to 3 seconds
 - 2 recursions ~ 10 to 25 minutes
 - 3 recursions ~ 900 minutes to 2700 minutes
