@@ -34,6 +34,7 @@ Analysing with a recusrion above 3 is often an impossible task cause the differe
 - 2 recursions ~ 10 to 25 minutes
 - 3 recursions ~ 900 minutes to 2700 minutes
 - 4 and more recursions ~ 60 000 minutes and more
+
 You usually dont need to wait the end to find the result, oftenly the result is showed the first 10% of the search
 but 10% of 60 000 is still 6 000 minutes
 ### /!\ Good to Know (Score)
