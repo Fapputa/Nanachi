@@ -3720,57 +3720,60 @@ class PentestTool:
         if subprocess.run(['which', 'hashcat'], capture_output=True).returncode != 0:
             missing.append('hashcat')
         
-        # Haiti peut être installé dans ~/.local/share/gem/ruby/*/bin/ ou autre
+        # Résoudre le vrai user (sudo-aware)
+        real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or ''
+        
         haiti_found = False
         haiti_cmd = 'haiti'
         
-        # Liste des chemins à vérifier
-        search_paths = [
-            '/usr/local/bin/haiti',
-            '/usr/bin/haiti',
-            os.path.expanduser('~/bin/haiti'),
-            os.path.expanduser('~/.local/bin/haiti'),
-        ]
-        
-        # Chercher aussi dans ~/.local/share/gem/ruby/*/bin/
-        gem_base = os.path.expanduser('~/.local/share/gem/ruby')
-        if os.path.exists(gem_base):
-            try:
-                for version_dir in os.listdir(gem_base):
-                    haiti_path = os.path.join(gem_base, version_dir, 'bin', 'haiti')
-                    if os.path.exists(haiti_path):
-                        search_paths.insert(0, haiti_path)
-            except Exception:
-                pass
-        
-        # Chercher aussi dans ~/.gem/ruby/*/bin/
-        gem_base2 = os.path.expanduser('~/.gem/ruby')
-        if os.path.exists(gem_base2):
-            try:
-                for version_dir in os.listdir(gem_base2):
-                    haiti_path = os.path.join(gem_base2, version_dir, 'bin', 'haiti')
-                    if os.path.exists(haiti_path):
-                        search_paths.insert(0, haiti_path)
-            except Exception:
-                pass
-        
-        # Tester chaque chemin
-        for path in search_paths:
-            if os.path.exists(path) and os.access(path, os.X_OK):
+        # 1. Essayer which en premier (si haiti est dans le PATH de l'user courant)
+        try:
+            result = subprocess.run(['which', 'haiti'], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                haiti_cmd = result.stdout.strip()
                 haiti_found = True
-                haiti_cmd = path
-                break
+        except Exception:
+            pass
         
-        # Fallback: essayer which
         if not haiti_found:
-            try:
-                result = subprocess.run(['which', 'haiti'], 
-                                       capture_output=True, text=True)
-                if result.returncode == 0 and result.stdout.strip():
-                    haiti_cmd = result.stdout.strip()
+            # 2. Construire la liste des chemins à chercher
+            search_paths = []
+            
+            # Chemins standards
+            search_paths += [
+                '/usr/local/bin/haiti',
+                '/usr/bin/haiti',
+            ]
+            
+            # Chemins utilisateur (real_user et ~)
+            for home in ([f'/home/{real_user}'] if real_user and real_user != 'root' else []) + [os.path.expanduser('~')]:
+                search_paths += [
+                    os.path.join(home, 'bin', 'haiti'),
+                    os.path.join(home, '.local', 'bin', 'haiti'),
+                ]
+                # ~/.local/share/gem/ruby/*/bin/
+                gem_base = os.path.join(home, '.local', 'share', 'gem', 'ruby')
+                if os.path.isdir(gem_base):
+                    try:
+                        for version_dir in sorted(os.listdir(gem_base), reverse=True):
+                            search_paths.insert(0, os.path.join(gem_base, version_dir, 'bin', 'haiti'))
+                    except Exception:
+                        pass
+                # ~/.gem/ruby/*/bin/
+                gem_base2 = os.path.join(home, '.gem', 'ruby')
+                if os.path.isdir(gem_base2):
+                    try:
+                        for version_dir in sorted(os.listdir(gem_base2), reverse=True):
+                            search_paths.append(os.path.join(gem_base2, version_dir, 'bin', 'haiti'))
+                    except Exception:
+                        pass
+            
+            # Tester chaque chemin
+            for path in search_paths:
+                if os.path.isfile(path) and os.access(path, os.X_OK):
                     haiti_found = True
-            except Exception:
-                pass
+                    haiti_cmd = path
+                    break
 
         
         if not haiti_found:
@@ -3971,14 +3974,32 @@ class PentestTool:
         # ── ÉTAPE 3 : WORDLIST ────────────────────────────────────────────────
         console.print("\n[orange1]═══ ÉTAPE 3 : WORDLIST ═══[/orange1]\n")
         
-        current_dir = os.getcwd()
-        wordlists = glob.glob(os.path.join(current_dir, '*.txt'))
-        wordlists += glob.glob(os.path.join(current_dir, '*.dic'))
+        # Résoudre le répertoire nanachi (fonctionne avec ou sans sudo)
+        real_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+        if real_user and real_user != 'root':
+            nanachi_dir = f'/home/{real_user}/nanachi'
+        else:
+            nanachi_dir = os.path.expanduser("~/nanachi")
         
-        console.print(f"[orange1]Wordlists dans {current_dir}:[/orange1]")
+        # Chercher wordlists dans ~/nanachi/ EN PRIORITÉ, puis cwd
+        wordlists = []
+        if os.path.isdir(nanachi_dir):
+            wordlists += sorted(glob.glob(os.path.join(nanachi_dir, '*.txt')))
+            wordlists += sorted(glob.glob(os.path.join(nanachi_dir, '*.dic')))
+        
+        current_dir = os.getcwd()
+        if current_dir != nanachi_dir:
+            wordlists += glob.glob(os.path.join(current_dir, '*.txt'))
+            wordlists += glob.glob(os.path.join(current_dir, '*.dic'))
+        
+        # Dédoublonner en préservant l'ordre
+        seen = set()
+        wordlists = [w for w in wordlists if not (w in seen or seen.add(w))]
+        
         if wordlists:
+            console.print(f"[orange1]Wordlists disponibles (depuis {nanachi_dir}):[/orange1]")
             for idx, wl in enumerate(wordlists, 1):
-                console.print(f"  {idx}. {os.path.basename(wl)}")
+                console.print(f"  {idx}. [cyan]{os.path.basename(wl)}[/cyan]  [dim]{wl}[/dim]")
             console.print("  0. Chemin personnalisé")
             wl_choice = Prompt.ask("Wordlist", default="1")
             try:
@@ -3989,6 +4010,7 @@ class PentestTool:
             except (ValueError, IndexError):
                 wordlist = wordlists[0] if wordlists else None
         else:
+            console.print(f"[warning]⚠ Aucune wordlist trouvée dans {nanachi_dir}[/warning]")
             wordlist = Prompt.ask("[orange1]Chemin wordlist[/orange1]")
 
         if not wordlist or not os.path.exists(wordlist):
@@ -4001,6 +4023,12 @@ class PentestTool:
         console.print("[dim]Les règles modifient les mots de la wordlist[/dim]")
         console.print("[dim]Exemples: +2 char random, majuscules, leet speak...[/dim]\n")
         
+        # Chercher les fichiers .rule dans ~/nanachi/
+        nanachi_rules = []
+        if os.path.isdir(nanachi_dir):
+            nanachi_rules += sorted(glob.glob(os.path.join(nanachi_dir, '*.rule')))
+            nanachi_rules += sorted(glob.glob(os.path.join(nanachi_dir, '*.rules')))
+        
         console.print("[orange1]Options:[/orange1]")
         console.print("  1. Aucune règle (attaque directe)")
         console.print("  2. best64.rule (règles courantes)")
@@ -4009,29 +4037,53 @@ class PentestTool:
         console.print("  5. Append 4 random chars (?a?a?a?a)")
         console.print("  6. Règle personnalisée")
         
+        # Afficher les règles custom depuis ~/nanachi/ si présentes
+        rule_offset = 6
+        if nanachi_rules:
+            console.print(f"\n[cyan]Règles dans {nanachi_dir}:[/cyan]")
+            for idx, rf in enumerate(nanachi_rules, rule_offset + 1):
+                console.print(f"  {idx}. [cyan]{os.path.basename(rf)}[/cyan]  [dim]{rf}[/dim]")
+        
         rule_choice = Prompt.ask("[orange1]Règle[/orange1]", default="1")
         
         rule_args = []
-        if rule_choice == "2":
-            # best64.rule (généralement dans /usr/share/hashcat/rules/)
-            rule_file = "/usr/share/hashcat/rules/best64.rule"
-            if os.path.exists(rule_file):
-                rule_args = ['-r', rule_file]
-            else:
-                console.print(f"[warning]⚠ {rule_file} introuvable, utilisation sans règle[/warning]")
-        elif rule_choice == "3":
-            # Append 2 chars: passe en mode masque hybride
-            rule_args = ['-a', '6', wordlist, '?a?a']
-            wordlist = None  # Ne pas passer -w en mode hybride
-        elif rule_choice == "4":
-            rule_args = ['-a', '6', wordlist, '?a?a?a']
-            wordlist = None
-        elif rule_choice == "5":
-            rule_args = ['-a', '6', wordlist, '?a?a?a?a']
-            wordlist = None
-        elif rule_choice == "6":
-            custom_rule = Prompt.ask("[orange1]Règle personnalisée[/orange1] (ex: best64.rule ou -a 6 ?a?a)")
-            rule_args = custom_rule.split()
+        try:
+            rule_num = int(rule_choice)
+            if rule_num > rule_offset and nanachi_rules:
+                # Règle custom depuis ~/nanachi/
+                custom_rule_file = nanachi_rules[rule_num - rule_offset - 1]
+                if os.path.exists(custom_rule_file):
+                    rule_args = ['-r', custom_rule_file]
+                else:
+                    console.print(f"[warning]⚠ Fichier introuvable: {custom_rule_file}[/warning]")
+        except (ValueError, IndexError):
+            pass
+        
+        if not rule_args:
+            if rule_choice == "2":
+                # best64.rule — chercher aussi dans ~/nanachi/
+                candidates = [
+                    os.path.join(nanachi_dir, 'best64.rule'),
+                    "/usr/share/hashcat/rules/best64.rule",
+                    "/usr/lib/hashcat/rules/best64.rule",
+                ]
+                rule_file = next((p for p in candidates if os.path.exists(p)), None)
+                if rule_file:
+                    rule_args = ['-r', rule_file]
+                else:
+                    console.print(f"[warning]⚠ best64.rule introuvable, utilisation sans règle[/warning]")
+            elif rule_choice == "3":
+                rule_args = ['-a', '6', wordlist, '?a?a']
+                wordlist = None
+            elif rule_choice == "4":
+                rule_args = ['-a', '6', wordlist, '?a?a?a']
+                wordlist = None
+            elif rule_choice == "5":
+                rule_args = ['-a', '6', wordlist, '?a?a?a?a']
+                wordlist = None
+            elif rule_choice == "6":
+                custom_rule = Prompt.ask("[orange1]Règle personnalisée[/orange1] (ex: best64.rule ou -a 6 ?a?a)")
+                rule_args = custom_rule.split()
 
         # ── ÉTAPE 5 : OPTIONS SUPPLÉMENTAIRES ─────────────────────────────────
         console.print("\n[orange1]═══ ÉTAPE 5 : OPTIONS ═══[/orange1]\n")
