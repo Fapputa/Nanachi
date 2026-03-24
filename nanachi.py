@@ -30,6 +30,8 @@ from rich.style import Style
 from rich.color import Color
 from rich.theme import Theme
 from rich.columns import Columns
+import requests
+import json
 
 # Configuration des couleurs du thème (dégradé rouge-blanc-orange)
 custom_theme = Theme({
@@ -177,7 +179,7 @@ SKULL_PART2 = r"""      ._###ZZ @  .  @  Z####`
       ##....../      |..\Z    |;
       / `-.___/      |../Z    |
       |    ZZ |      |./  Z   |;;
-     ;|Z    /x\____/x     Z   |;
+     ;|Z     /x\____/x     Z   |;
      ;\ Z   /xxxxxxxxxxx\   Z __|
       ;\Z /'##xxxxxxxx###`\__Z .\_
       Z|/#| ####xxxx####  |##\Z ..|
@@ -1044,6 +1046,113 @@ class NetworkInterface:
         return interfaces
 
 
+
+
+class GeoIPLookup:
+    """Géolocalisation d'adresses IP publiques"""
+    
+    _cache = {}
+    
+    @classmethod
+    def lookup(cls, ip: str):
+        """Recherche la géolocalisation d'une IP"""
+        if ip in cls._cache:
+            return cls._cache[ip]
+        
+        if cls._is_private_ip(ip):
+            return None
+        
+        try:
+            url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get('status') == 'success':
+                    result = {
+                        'country': data.get('country', 'Inconnu'),
+                        'country_code': data.get('countryCode', ''),
+                        'region': data.get('regionName', ''),
+                        'city': data.get('city', ''),
+                        'lat': data.get('lat'),
+                        'lon': data.get('lon'),
+                        'isp': data.get('isp', ''),
+                        'org': data.get('org', ''),
+                        'as': data.get('as', '')
+                    }
+                    cls._cache[ip] = result
+                    return result
+        except:
+            pass
+        
+        return None
+    
+    @classmethod
+    def _is_private_ip(cls, ip: str) -> bool:
+        """Vérifie si une IP est privée"""
+        try:
+            parts = ip.split('.')
+            if len(parts) != 4:
+                return True
+            
+            first = int(parts[0])
+            second = int(parts[1])
+            
+            if first == 10:
+                return True
+            if first == 172 and 16 <= second <= 31:
+                return True
+            if first == 192 and second == 168:
+                return True
+            if first == 127:
+                return True
+            if first == 169 and second == 254:
+                return True
+            
+            return False
+        except:
+            return True
+    
+    @classmethod
+    def format_location(cls, geo_data) -> str:
+        """Formate les données de géolocalisation"""
+        if not geo_data:
+            return None
+        
+        parts = []
+        if geo_data.get('city'):
+            parts.append(geo_data['city'])
+        if geo_data.get('region'):
+            parts.append(geo_data['region'])
+        if geo_data.get('country'):
+            country = geo_data['country']
+            if geo_data.get('country_code'):
+                country = f"{country} ({geo_data['country_code']})"
+            parts.append(country)
+        
+        location = ", ".join(parts) if parts else "Inconnu"
+        
+        if geo_data.get('lat') and geo_data.get('lon'):
+            location += f" [{geo_data['lat']:.4f}, {geo_data['lon']:.4f}]"
+        
+        return location
+    
+    @classmethod
+    def format_isp(cls, geo_data) -> str:
+        """Formate les informations ISP"""
+        if not geo_data:
+            return None
+        
+        if geo_data.get('org'):
+            return geo_data['org']
+        elif geo_data.get('isp'):
+            return geo_data['isp']
+        elif geo_data.get('as'):
+            return geo_data['as']
+        
+        return None
+
 class NmapScanner:
     """Gère les scans Nmap"""
     
@@ -1203,6 +1312,17 @@ class NmapScanner:
                 info_table.add_row("🔍 OS (guess)", f"[yellow]{host_info['os_guess'][:80]}[/yellow]")
             if host_info['os_cpe']:
                 info_table.add_row("📋 CPE", f"[dim]{host_info['os_cpe']}[/dim]")
+
+            # Géolocalisation pour IPs publiques
+            geo_data = GeoIPLookup.lookup(ip)
+            if geo_data:
+                location_str = GeoIPLookup.format_location(geo_data)
+                if location_str:
+                    info_table.add_row("🌍 Localisation", f"[cyan]{location_str}[/cyan]")
+                
+                isp_str = GeoIPLookup.format_isp(geo_data)
+                if isp_str:
+                    info_table.add_row("🏢 ISP/Org", f"[yellow]{isp_str}[/yellow]")
 
             console.print(info_table)
 
@@ -1626,6 +1746,7 @@ class PentestTool:
         self.interfaces = []
         self.scan_results = []
         self.ssh_credentials = {}
+        self.scan_cache = {}  # Cache des scans déjà effectués
         self.dns_monitor = DNSMonitor()
         # Charger la base OUI au démarrage
         OUILookup.load_oui_file()
@@ -1780,6 +1901,78 @@ class PentestTool:
         
         if networks:
             WiFiScanner.display_networks(networks)
+            
+            # Proposer un scan nmap des réseaux trouvés
+            console.print("\n[orange1]═══ SCAN NMAP DES RÉSEAUX WiFi ═══[/orange1]")
+            if Confirm.ask("\n[orange1]Voulez-vous scanner un de ces réseaux avec Nmap ?[/orange1]", default=False):
+                # Lister les réseaux avec leur BSSID pour sélection
+                console.print("\n[orange1]Réseaux disponibles:[/orange1]")
+                for idx, net in enumerate(networks, 1):
+                    console.print(f"  {idx}. [white]{net['ssid']}[/white]  [dim]{net['bssid']}[/dim]  ch{net.get('chan','')}  {net.get('band','')}")
+                console.print("  0. Entrer une IP/plage manuellement")
+                
+                net_choice = Prompt.ask("[orange1]Choisissez un réseau[/orange1]", default="0")
+                
+                target_network = None
+                try:
+                    idx = int(net_choice)
+                    if idx == 0:
+                        target_network = Prompt.ask(
+                            "[orange1]IP ou plage réseau[/orange1]",
+                            default=""
+                        )
+                    elif 1 <= idx <= len(networks):
+                        selected = networks[idx - 1]
+                        console.print(f"\n[info]Réseau sélectionné: [bold]{selected['ssid']}[/bold] ({selected['bssid']})[/info]")
+                        console.print("[warning]⚠ Pour scanner les hôtes d'un réseau WiFi, vous devez être connecté à ce réseau.[/warning]")
+                        target_network = Prompt.ask(
+                            "[orange1]Plage IP à scanner[/orange1] (ex: 192.168.1.0/24)",
+                            default=""
+                        )
+                except (ValueError, IndexError):
+                    pass
+                
+                if target_network and target_network.strip():
+                    timing = Prompt.ask(
+                        "[orange1]Timing[/orange1]",
+                        choices=["T1", "T2", "T3", "T4", "T5"],
+                        default="T3"
+                    )
+                    hosts = NmapScanner.scan_network(target_network.strip(), timing)
+                    
+                    if hosts:
+                        console.print("\n[orange1]Hôtes trouvés:[/orange1]")
+                        host_table = Table(box=box.ROUNDED, style="white")
+                        host_table.add_column("#",         style="orange1", width=4)
+                        host_table.add_column("IP",        style="white",   width=15)
+                        host_table.add_column("MAC",       style="dim white", width=17)
+                        host_table.add_column("Fabricant", style="green",   overflow="fold")
+                        for i, host in enumerate(hosts, 1):
+                            host_table.add_row(
+                                str(i),
+                                host['ip'],
+                                host.get('mac') or '—',
+                                host.get('manufacturer') or '—'
+                            )
+                        console.print(host_table)
+                        
+                        # Proposer scan détaillé
+                        if Confirm.ask("\n[orange1]Scanner un hôte en détail ?[/orange1]", default=False):
+                            host_choice = Prompt.ask("[orange1]Numéro de l'hôte[/orange1]", default="1")
+                            try:
+                                selected_host = hosts[int(host_choice) - 1]
+                                scan_type = Prompt.ask(
+                                    "[orange1]Type de scan[/orange1]",
+                                    choices=["top", "large"],
+                                    default="top"
+                                )
+                                result = NmapScanner.scan_host(selected_host['ip'], scan_type, timing)
+                                if result:
+                                    self.scan_results.append(result)
+                            except (ValueError, IndexError):
+                                console.print("[error]Choix invalide[/error]")
+                    else:
+                        console.print("[warning]Aucun hôte trouvé sur ce réseau.[/warning]")
         
         Prompt.ask("\n[warning]Appuyez sur Entrée pour continuer[/warning]")
     
